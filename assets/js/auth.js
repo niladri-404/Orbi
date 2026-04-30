@@ -32,9 +32,26 @@ let registrationInProgress = false;
 const firebaseSetupMessage =
   "Firebase is not configured yet. Paste your project values into assets/js/firebase-config.js.";
 
+const statusIcons = {
+  success: "✔",
+  error: "❌",
+  warning: "⚠️",
+  info: "ℹ️"
+};
+
 const showMessage = (target, message, type = "info") => {
   if (!target) return;
-  target.textContent = message;
+
+  const icon = document.createElement("span");
+  icon.className = "status-icon";
+  icon.textContent = statusIcons[type] || statusIcons.info;
+
+  const text = document.createElement("span");
+  text.textContent = message;
+
+  target.innerHTML = "";
+  target.appendChild(icon);
+  target.appendChild(text);
   target.className = `auth-message ${type}`;
   target.hidden = false;
 };

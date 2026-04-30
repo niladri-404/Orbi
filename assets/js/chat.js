@@ -55,13 +55,20 @@ const state = {
 
 
 const els = {
+  sidebar: $("[data-sidebar]"),
+  sidebarBackdrop: $("[data-sidebar-backdrop]"),
+  sidebarToggleButtons: $$('[data-sidebar-toggle]'),
   contactList: $("[data-contact-list]"),
   conversationList: $("[data-conversation-list]"),
   userSearch: $("[data-user-search]"),
   inviteButton: $("[data-invite-button]"),
+  requestsToggle: $("[data-requests-toggle]"),
+  requestsPanel: $("[data-requests-panel]"),
   requestForm: $("[data-request-form]"),
   requestEmail: $("[data-request-email]"),
   requestList: $("[data-request-list]"),
+  removeContactBtn: $("[data-remove-contact]"),
+  blockContactBtn: $("[data-block-contact]"),
   chatTitle: $("[data-chat-title]"),
   chatSubtitle: $("[data-chat-subtitle]"),
   chatAvatar: $("[data-chat-avatar]"),
@@ -76,18 +83,64 @@ const els = {
 
 // Helpers for safe text output and formatting timestamps for chat messages.
 
-
-const showMessage = (message, type = "info") => {
-  if (!els.pageMessage) return;
-  els.pageMessage.textContent = message;
-  els.pageMessage.className = `auth-message ${type}`;
-  els.pageMessage.hidden = false;
+const statusIcons = {
+  success: "✔",
+  error: "❌",
+  warning: "⚠️",
+  info: "ℹ️"
 };
+
+const showStatus = (message, type = "info", target = els.pageMessage) => {
+  if (!target) return;
+  const icon = document.createElement("span");
+  icon.className = "status-icon";
+  icon.textContent = statusIcons[type] || statusIcons.info;
+
+  const text = document.createElement("span");
+  text.textContent = message;
+
+  target.innerHTML = "";
+  target.appendChild(icon);
+  target.appendChild(text);
+  target.className = `auth-message ${type}`;
+  target.hidden = false;
+};
+
+const showMessage = showStatus;
 
 const hideMessage = () => {
   if (!els.pageMessage) return;
   els.pageMessage.textContent = "";
   els.pageMessage.hidden = true;
+};
+
+const openSidebar = () => {
+  if (!els.sidebar) return;
+  els.sidebar.classList.add("open");
+  els.sidebarBackdrop?.classList.add("open");
+  if (els.sidebarBackdrop) els.sidebarBackdrop.hidden = false;
+  document.body.classList.add("sidebar-open");
+};
+
+const closeSidebar = () => {
+  if (!els.sidebar) return;
+  els.sidebar.classList.remove("open");
+  els.sidebarBackdrop?.classList.remove("open");
+  if (els.sidebarBackdrop) {
+    window.setTimeout(() => {
+      els.sidebarBackdrop.hidden = true;
+    }, 260);
+  }
+  document.body.classList.remove("sidebar-open");
+};
+
+const toggleSidebar = () => {
+  if (!els.sidebar) return;
+  if (els.sidebar.classList.contains("open")) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
 };
 
 const initials = (name = "", email = "") => {
@@ -425,6 +478,35 @@ const rejectConnectionRequest = async (requestId, request) => {
   ]);
 };
 
+const removeContact = async (contactUid) => {
+  if (!state.currentUser) return;
+  await Promise.all([
+    deleteDoc(doc(db, "contacts", state.currentUser.uid, "list", contactUid)),
+    deleteDoc(doc(db, "contacts", contactUid, "list", state.currentUser.uid))
+  ]);
+  state.activePeer = null;
+  state.activeChatId = "";
+  setChatHeader(null);
+  renderContacts();
+  renderConversations();
+  els.chatStream.innerHTML = `
+    <div class="chat-empty">
+      <strong>Your chats will appear here</strong>
+      <span>Select a user from the sidebar to start a one-to-one conversation.</span>
+    </div>
+  `;
+  showMessage("Contact removed. You can still reconnect with an invite.", "info");
+};
+
+const blockContact = async (contactUid) => {
+  if (!state.currentUser) return;
+  await setDoc(doc(db, "blocks", state.currentUser.uid, "blocked", contactUid), {
+    blockedAt: serverTimestamp()
+  });
+  await removeContact(contactUid);
+  showMessage("Contact blocked and removed from your list.", "warning");
+};
+
 const processInviteLink = async () => {
   const params = new URLSearchParams(window.location.search);
   const inviteId = params.get("invite");
@@ -610,12 +692,18 @@ const setChatHeader = (peer) => {
       els.typingIndicator.textContent = "";
       els.typingIndicator.hidden = true;
     }
+    if (els.removeContactBtn) els.removeContactBtn.hidden = true;
+    if (els.blockContactBtn) els.blockContactBtn.hidden = true;
     els.messageInput.disabled = true;
     els.sendButton.disabled = true;
     return;
   }
 
   const isTyping = Boolean(state.peerTyping);
+  const presenceText = formatPresenceLabel(peer);
+
+  if (els.removeContactBtn) els.removeContactBtn.hidden = false;
+  if (els.blockContactBtn) els.blockContactBtn.hidden = false;
   const presenceText = formatPresenceLabel(peer);
 
   els.chatTitle.textContent = safeText(peer.name, "Orbi User");
@@ -670,10 +758,17 @@ const renderMessages = (messages) => {
     const outgoing = message.senderId === state.currentUser.uid;
     const statusText = outgoing
       ? message.readBy?.includes(state.activePeer?.uid)
-        ? "Seen"
+        ? "✔✔ Seen"
         : message.deliveredAt
-          ? "Delivered"
-          : "Sending"
+          ? "✔ Sent"
+          : "⌛ Sending"
+      : "";
+    const statusClass = outgoing
+      ? message.readBy?.includes(state.activePeer?.uid)
+        ? "seen"
+        : message.deliveredAt
+          ? "sent"
+          : "info"
       : "";
 
     return `
@@ -682,7 +777,7 @@ const renderMessages = (messages) => {
         <div class="message-content">
           <p>${escapeHTML(message.text)}</p>
           <span class="message-time">${formatTime(message.createdAt)}</span>
-          ${statusText ? `<span class="message-status">${statusText}</span>` : ""}
+          ${statusText ? `<span class="message-status ${statusClass}">${statusText}</span>` : ""}
         </div>
       </article>
     `;
@@ -771,7 +866,7 @@ const openConversation = async (peer, chatId = "") => {
     setChatHeader(state.activePeer);
   });
   await markChatRead(state.activeChatId);
-  $("[data-sidebar]")?.classList.remove("open");
+  closeSidebar();
 };
 
 // Send a message for the active chat and update the chat document for unread counts.
@@ -922,6 +1017,33 @@ const bindEvents = () => {
         showMessage("Request rejected.", "warning");
       }
     }
+  });
+
+  els.requestsToggle?.addEventListener("click", () => {
+    if (!els.requestsPanel) return;
+    const isOpen = els.requestsPanel.classList.toggle("open");
+    els.requestsPanel.hidden = !isOpen;
+    els.requestsToggle.textContent = isOpen ? "Hide requests" : "Show requests";
+  });
+
+  els.sidebarToggleButtons?.forEach((button) => {
+    button.addEventListener("click", toggleSidebar);
+  });
+
+  els.sidebarBackdrop?.addEventListener("click", closeSidebar);
+
+  els.removeContactBtn?.addEventListener("click", async () => {
+    if (!state.activePeer) return;
+    const confirmed = window.confirm(`Remove ${state.activePeer.name || state.activePeer.email || 'this contact'}?`);
+    if (!confirmed) return;
+    await removeContact(state.activePeer.uid);
+  });
+
+  els.blockContactBtn?.addEventListener("click", async () => {
+    if (!state.activePeer) return;
+    const confirmed = window.confirm(`Block ${state.activePeer.name || state.activePeer.email || 'this contact'}?`);
+    if (!confirmed) return;
+    await blockContact(state.activePeer.uid);
   });
 
   els.contactList?.addEventListener("click", async (event) => {
