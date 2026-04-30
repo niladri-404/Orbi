@@ -271,7 +271,12 @@ const userDocRef = (uid) => doc(db, "users", uid);
 
 const getUserProfile = async (user) => {
   const snap = await getDoc(userDocRef(user.uid));
-  if (snap.exists()) return snap.data();
+  if (snap.exists()) {
+    console.log("[Auth] User profile already exists:", snap.data());
+    return snap.data();
+  }
+
+  console.log("[Auth] Creating new user profile for:", user.uid);
 
   const profile = {
     uid: user.uid,
@@ -285,7 +290,17 @@ const getUserProfile = async (user) => {
     lastSeen: serverTimestamp(),
     createdAt: serverTimestamp()
   };
-  await setDoc(userDocRef(user.uid), profile, { merge: true });
+
+  console.log("[Auth] Saving profile to Firestore:", profile);
+
+  try {
+    await setDoc(userDocRef(user.uid), profile, { merge: true });
+    console.log("[Auth] Profile saved successfully");
+  } catch (error) {
+    console.error("[Auth] Failed to save profile:", error);
+    throw error;
+  }
+
   return profile;
 };
 

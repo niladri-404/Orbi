@@ -385,25 +385,73 @@ const acceptInvite = async (inviteId) => {
 const searchUserByEmail = async (email) => {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) throw new Error("Enter an email to search.");
+  if (!normalizedEmail.includes("@")) throw new Error("Please enter a valid email address.");
+
+  console.log("[Search] Searching for email:", normalizedEmail);
 
   const usersRef = collection(db, "users");
   const queryRef = query(usersRef, where("emailLower", "==", normalizedEmail));
   const snapshot = await getDocs(queryRef);
-  if (snapshot.empty) throw new Error("No user found with that email.");
+  
+  console.log("[Search] Query returned", snapshot.docs.length, "result(s)");
+
+  if (snapshot.empty) {
+    console.log("[Search] No user found with email:", normalizedEmail);
+    throw new Error(`No user found with email ${email}. Make sure they are registered.`);
+  }
 
   const userDoc = snapshot.docs[0];
-  if (userDoc.id === state.currentUser.uid) throw new Error("You cannot request yourself.");
+  const userData = userDoc.data();
+  
+  console.log("[Search] Found user:", { uid: userDoc.id, name: userData.name, email: userData.email });
 
-  return { uid: userDoc.id, ...userDoc.data() };
+  if (userDoc.id === state.currentUser.uid) {
+    console.log("[Search] User tried to search themselves:", state.currentUser.uid);
+    throw new Error("You cannot send a request to yourself.");
+  }
+
+  return { uid: userDoc.id, ...userData };
+};
+
+const checkExistingRequest = async (targetUid) => {
+  if (!state.currentUser) return false;
+  
+  try {
+    const outgoingRef = doc(db, "requests", state.currentUser.uid, "outgoing", targetUid);
+    const existing = await getDoc(outgoingRef);
+    return existing.exists();
+  } catch (error) {
+    console.log("[Request] Error checking existing request:", error.message);
+    return false;
+  }
 };
 
 const sendConnectionRequest = async (email) => {
-  if (!state.currentUser) return;
-  const target = await searchUserByEmail(email);
-  if (isContact(target.uid)) throw new Error("This user is already in your contacts.");
+  if (!state.currentUser) {
+    throw new Error("You must be logged in to send a request.");
+  }
 
-  const outgoingDoc = doc(db, "requests", state.currentUser.uid, "outgoing", target.uid);
-  const incomingDoc = doc(db, "requests", target.uid, "incoming", state.currentUser.uid);
+  console.log("[Request] Sending request from:", state.currentUser.uid);
+
+  let target;
+  try {
+    target = await searchUserByEmail(email);
+  } catch (searchError) {
+    console.log("[Request] Search failed:", searchError.message);
+    throw searchError;
+  }
+
+  if (isContact(target.uid)) {
+    console.log("[Request] User already in contacts:", target.uid);
+    throw new Error(`${target.email} is already in your contacts.`);
+  }
+
+  const alreadyRequested = await checkExistingRequest(target.uid);
+  if (alreadyRequested) {
+    console.log("[Request] Request already sent to:", target.uid);
+    throw new Error(`Request already sent to ${target.email}. Please wait for them to accept.`);
+  }
+
   const payload = {
     fromUid: state.currentUser.uid,
     fromName: state.currentProfile?.name || state.currentUser.displayName || "Orbi User",
@@ -414,10 +462,22 @@ const sendConnectionRequest = async (email) => {
     createdAt: serverTimestamp()
   };
 
-  await Promise.all([
-    setDoc(outgoingDoc, payload, { merge: true }),
-    setDoc(incomingDoc, payload, { merge: true })
-  ]);
+  console.log("[Request] Creating request payload:", payload);
+
+  try {
+    const outgoingDoc = doc(db, "requests", state.currentUser.uid, "outgoing", target.uid);
+    const incomingDoc = doc(db, "requests", target.uid, "incoming", state.currentUser.uid);
+
+    await Promise.all([
+      setDoc(outgoingDoc, payload, { merge: true }),
+      setDoc(incomingDoc, payload, { merge: true })
+    ]);
+
+    console.log("[Request] Successfully sent to:", target.uid);
+  } catch (writeError) {
+    console.error("[Request] Firestore write failed:", writeError);
+    throw new Error(`Failed to send request: ${writeError.message}`);
+  }
 };
 
 const listenIncomingRequests = () => {
@@ -573,7 +633,13 @@ const peerFromChat = (chat) => {
 
 const profileFromUser = async (user) => {
   const snap = await getDoc(doc(db, "users", user.uid));
-  if (snap.exists()) return snap.data();
+  if (snap.exists()) {
+    console.log("[Chat] User profile loaded from Firestore:", snap.data());
+    return snap.data();
+  }
+
+  console.log("[Chat] Creating user profile from Auth object:", user.uid);
+
   const profile = {
     uid: user.uid,
     name: user.displayName || user.email || "Orbi User",
@@ -586,7 +652,17 @@ const profileFromUser = async (user) => {
     lastSeen: serverTimestamp(),
     createdAt: serverTimestamp()
   };
-  await setDoc(doc(db, "users", user.uid), profile, { merge: true });
+
+  console.log("[Chat] Saving profile to Firestore:", profile);
+
+  try {
+    await setDoc(doc(db, "users", user.uid), profile, { merge: true });
+    console.log("[Chat] Profile saved successfully");
+  } catch (error) {
+    console.error("[Chat] Failed to save profile:", error);
+    throw error;
+  }
+
   return profile;
 };
 
