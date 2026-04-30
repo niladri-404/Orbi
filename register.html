@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Account | Orbi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/css/styles.css" />
+  </head>
+  <body data-page="register">
+    <header class="topbar">
+      <div class="topbar-inner" data-nav-inner>
+        <a class="brand" href="index.html"><span class="brand-mark"></span><span>Orbi</span></a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="index.html">Home</a>
+          <a href="login.html">Login</a>
+          <a class="active" href="register.html">Register</a>
+          <a href="chat.html">Dashboard</a>
+        </nav>
+        <div class="nav-actions">
+          <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v2.2M12 18.8V21M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M3 12h2.2M18.8 12H21M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </button>
+          <a class="button secondary" href="login.html">Sign in</a>
+          <button class="mobile-menu" type="button" data-mobile-menu aria-label="Open menu" aria-expanded="false">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="auth-page">
+      <section class="auth-layout">
+        <aside class="auth-panel">
+          <p class="eyebrow">Join Orbi</p>
+          <h1>Start with a private workspace.</h1>
+          <p>Create a secure account, verify trusted devices, and invite your team into a calmer chat environment.</p>
+          <div class="trust-row">
+            <span class="trust-pill"><span class="status-dot"></span> Backend-ready form</span>
+            <span class="trust-pill">SSO-friendly layout</span>
+          </div>
+        </aside>
+
+        <form class="auth-card" data-register-form>
+          <div class="form-header">
+            <h2>Create your account</h2>
+            <p class="form-hint">Verify your email with a one-time code sent to your inbox, then finish account creation.</p>
+          </div>
+          <div class="form-group">
+            <label for="name">Full name</label>
+            <input id="name" name="name" type="text" placeholder="Mira Kapoor" autocomplete="name" required />
+          </div>
+          <div class="form-group">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" placeholder="mira@company.com" required />
+          </div>
+          <div class="form-group">
+            <label for="photoURL">Photo URL</label>
+            <input id="photoURL" name="photoURL" type="url" placeholder="https://example.com/avatar.jpg" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="password">Password</label>
+              <div class="password-field">
+                <input id="password" name="password" type="password" placeholder="********" autocomplete="new-password" required />
+                <button class="password-toggle" type="button" data-toggle-password="password" aria-label="Show password">
+                  <span class="eye-icon" data-eye-icon></span>
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="confirmPassword">Confirm password</label>
+              <div class="password-field">
+                <input id="confirmPassword" name="confirmPassword" type="password" placeholder="********" autocomplete="new-password" required />
+                <button class="password-toggle" type="button" data-toggle-password="confirmPassword" aria-label="Show password">
+                  <span class="eye-icon" data-eye-icon></span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="password-strength" data-password-strength>
+            <div class="strength-track"><span data-strength-bar></span></div>
+            <strong data-strength-label>Weak</strong>
+          </div>
+          <ul class="password-rules" aria-label="Password requirements">
+            <li data-rule="length">8+ characters</li>
+            <li data-rule="upper">Uppercase letter</li>
+            <li data-rule="lower">Lowercase letter</li>
+            <li data-rule="number">Number</li>
+            <li data-rule="special">Symbol</li>
+          </ul>
+          <div class="auth-message" data-auth-message hidden></div>
+          <label class="check-row" for="terms">
+            <span>I agree to Orbi security terms and privacy policy.</span>
+            <input id="terms" type="checkbox" required />
+          </label>
+          <button class="button primary full" type="submit">Create secure account</button>
+          <p class="form-footer">Already have an account? <a href="login.html">Sign in</a></p>
+        </form>
+      </section>
+    </main>
+
+    <div class="modal-backdrop" data-otp-modal hidden>
+      <section class="otp-modal" role="dialog" aria-modal="true" aria-labelledby="otpTitle">
+        <div class="form-header">
+          <p class="eyebrow">Email OTP</p>
+          <h2 id="otpTitle">Verify your email</h2>
+          <p class="form-hint">Enter the 6-digit code sent to <strong data-otp-email></strong>.</p>
+        </div>
+        <div class="demo-otp" data-demo-otp hidden></div>
+        <form data-otp-form>
+          <div class="form-group">
+            <label for="otpCode">Verification code</label>
+            <input id="otpCode" name="otpCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code" required />
+          </div>
+          <div class="auth-message" data-otp-message hidden></div>
+          <div class="modal-actions">
+            <button class="button secondary" type="button" data-close-otp>Cancel</button>
+            <button class="button secondary" type="button" data-resend-otp>Resend OTP</button>
+            <button class="button primary" type="submit">Verify & create</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script src="assets/js/app.js"></script>
+    <script type="module" src="assets/js/auth.js"></script>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login | Orbi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/css/styles.css" />
+  </head>
+  <body data-page="login">
+    <header class="topbar">
+      <div class="topbar-inner" data-nav-inner>
+        <a class="brand" href="index.html"><span class="brand-mark"></span><span>Orbi</span></a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="index.html">Home</a>
+          <a class="active" href="login.html">Login</a>
+          <a href="register.html">Register</a>
+          <a href="chat.html">Dashboard</a>
+        </nav>
+        <div class="nav-actions">
+          <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v2.2M12 18.8V21M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M3 12h2.2M18.8 12H21M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </button>
+          <a class="button primary" href="register.html">Get started</a>
+          <button class="mobile-menu" type="button" data-mobile-menu aria-label="Open menu" aria-expanded="false">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="auth-page">
+      <section class="auth-layout">
+        <aside class="auth-panel">
+          <p class="eyebrow">Welcome back</p>
+          <h1>Return to your secure orbit.</h1>
+          <p>Sign in to continue protected conversations, review trusted devices, and keep your team aligned without noise.</p>
+          <div class="trust-row">
+            <span class="trust-pill"><span class="status-dot"></span> Device check ready</span>
+            <span class="trust-pill">2FA flow ready</span>
+          </div>
+        </aside>
+
+        <form class="auth-card" data-login-form>
+          <div class="form-header">
+            <h2>Sign in</h2>
+            <p class="form-hint">Use your email and password to open Orbi securely.</p>
+          </div>
+          <div class="form-group">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" placeholder="you@company.com" required />
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <div class="password-field">
+              <input id="password" name="password" type="password" placeholder="********" autocomplete="current-password" required />
+              <button class="password-toggle" type="button" data-toggle-password="password" aria-label="Show password">
+                <span class="eye-icon" data-eye-icon></span>
+              </button>
+            </div>
+          </div>
+          <label class="check-row" for="remember">
+            <span>Keep this device trusted for 30 days</span>
+            <input id="remember" type="checkbox" />
+          </label>
+          <div class="auth-message" data-auth-message hidden></div>
+          <button class="button primary full" type="submit">Sign in securely</button>
+          <p class="form-footer"><button class="link-button" type="button" data-reset-password>Forgot password?</button> &middot; New to Orbi? <a href="register.html">Create account</a></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="assets/js/app.js"></script>
+    <script type="module" src="assets/js/auth.js"></script>
+  </body>
+</html>
