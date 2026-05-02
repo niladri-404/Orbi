@@ -2,16 +2,16 @@ const qs = (selector, scope = document) => scope.querySelector(selector);
 const qsa = (selector, scope = document) => [...scope.querySelectorAll(selector)];
 
 const setTheme = (mode) => {
-  document.body.classList.toggle("light-mode", mode === "light");
-  localStorage.setItem("orbi-theme", mode);
+  document.body.classList.toggle("dark-mode", mode === "dark");
+  localStorage.setItem("theme", mode);
   qsa("[data-theme-label]").forEach((label) => {
-    label.textContent = mode === "light" ? "Dark mode" : "Light mode";
+    label.textContent = mode === "dark" ? "Light mode" : "Dark mode";
   });
 };
 
-const savedTheme = localStorage.getItem("orbi-theme");
-if (savedTheme === "light") {
-  document.addEventListener("DOMContentLoaded", () => setTheme("light"));
+const savedTheme = localStorage.getItem("theme");
+if (savedTheme === "dark") {
+  document.addEventListener("DOMContentLoaded", () => setTheme("dark"));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -27,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   qsa("[data-theme-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
-      const next = document.body.classList.contains("light-mode") ? "dark" : "light";
+      const next = document.body.classList.contains("dark-mode") ? "light" : "dark";
       setTheme(next);
     });
   });

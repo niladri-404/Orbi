@@ -10,12 +10,13 @@
 import { auth, db, storage, messaging, isFirebaseConfigured } from "./firebase-config.js";
 
 console.log("Chat JS loaded successfully");
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import {
   addDoc,
   arrayUnion,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   FieldPath,
   getDoc,
@@ -314,15 +315,23 @@ const updateOwnPresence = async (status) => {
   }, { merge: true });
 };
 
-const typingDocRef = (chatId, uid) => doc(db, "typing", chatId, "users", uid);
-
 const setTypingState = async (chatId, isTyping) => {
   if (!chatId || !state.currentUser) return;
-  const typingRef = typingDocRef(chatId, state.currentUser.uid);
-  await setDoc(typingRef, {
-    isTyping,
-    updatedAt: serverTimestamp()
-  }, { merge: true });
+  const typingRef = doc(db, "typing", chatId);
+  
+  if (isTyping) {
+    await setDoc(typingRef, {
+      [state.currentUser.uid]: true
+    }, { merge: true });
+  } else {
+    try {
+      await updateDoc(typingRef, {
+        [state.currentUser.uid]: deleteField()
+      });
+    } catch (e) {
+      // Document might not exist or field already deleted, ignore
+    }
+  }
 };
 
 const listenUserStatus = (uid, callback) => {
@@ -338,17 +347,18 @@ const listenUserStatus = (uid, callback) => {
   }, () => {});
 };
 
-const listenTyping = (chatId, otherUserId, callback) => {
+const listenTyping = (chatId, callback) => {
   if (state.unsubPeerTyping) {
     state.unsubPeerTyping();
     state.unsubPeerTyping = null;
   }
-  if (!chatId || !otherUserId) return;
+  if (!chatId || !state.currentUser) return;
 
-  const typingRef = typingDocRef(chatId, otherUserId);
-  state.unsubPeerTyping = onSnapshot(typingRef, (snapshot) => {
-    const data = snapshot.exists() ? snapshot.data() : null;
-    callback(Boolean(data?.isTyping));
+  state.unsubPeerTyping = onSnapshot(doc(db, "typing", chatId), (docSnap) => {
+    const data = docSnap.data();
+    const isSomeoneTyping = Object.keys(data || {})
+      .some(uid => uid !== state.currentUser.uid);
+    callback(isSomeoneTyping);
   }, () => {});
 };
 
@@ -1017,8 +1027,8 @@ const sendImageMessage = async (imageUrl) => {
     text: "📷 Image", // For display purposes
     senderId: state.currentUser.uid,
     createdAt: serverTimestamp(),
-    deliveredAt: null,
-    readBy: []
+    deliveredTo: [state.currentUser.uid],
+    readBy: [state.currentUser.uid]
   });
 
   await updateDoc(doc(db, "chats", state.activeChatId), {
@@ -1038,8 +1048,8 @@ const sendAudioMessage = async (audioUrl, duration) => {
     text: "🎤 Voice message", // For display purposes
     senderId: state.currentUser.uid,
     createdAt: serverTimestamp(),
-    deliveredAt: null,
-    readBy: []
+    deliveredTo: [state.currentUser.uid],
+    readBy: [state.currentUser.uid]
   });
 
   await updateDoc(doc(db, "chats", state.activeChatId), {
@@ -1189,9 +1199,9 @@ window.playAudio = (button, url) => {
 const markMessagesDelivered = async (messages) => {
   if (!state.activeChatId || !state.currentUser) return;
   const updates = messages
-    .filter((message) => message.senderId !== state.currentUser.uid && !message.deliveredAt)
+    .filter((message) => message.senderId !== state.currentUser.uid && !message.deliveredTo?.includes(state.currentUser.uid))
     .map((message) => updateDoc(doc(db, "chats", state.activeChatId, "messages", message.id), {
-      deliveredAt: serverTimestamp()
+      deliveredTo: arrayUnion(state.currentUser.uid)
     }));
   if (!updates.length) return;
   await Promise.all(updates);
@@ -1208,6 +1218,12 @@ const markMessagesRead = async (messages) => {
   await Promise.all(updates);
 };
 
+function getTickStatus(msg) {
+  if (msg.readBy?.length > 1) return "✔✔ read";
+  if (msg.deliveredTo?.length > 1) return "✔✔";
+  return "✔";
+}
+
 const renderMessages = (messages) => {
   if (!messages.length) {
     els.chatStream.innerHTML = `
@@ -1220,14 +1236,15 @@ const renderMessages = (messages) => {
   }
 
   els.chatStream.innerHTML = messages.map((message) => {
-    const outgoing = message.senderId === state.currentUser.uid;
-    const statusText = outgoing
-      ? message.readBy?.includes(state.activePeer?.uid)
-        ? "✔✔"
-        : message.deliveredAt
-          ? "✔"
-          : "⌛"
-      : "";
+    const isMe =
+      message.senderId === state.currentUser.uid ||
+      message.senderId === state.currentUser.email; // fallback for old data
+
+    console.log("MSG sender:", message.senderId);
+    console.log("ME:", state.currentUser.uid);
+
+    const tickStatus = getTickStatus(message);
+    const tickHtml = isMe ? `<span class="tick ${tickStatus.includes('read') ? 'read' : ''}">${tickStatus.replace(' read', '')}</span>` : "";
 
     let content = "";
     if (message.type === "image") {
@@ -1248,12 +1265,12 @@ const renderMessages = (messages) => {
     }
 
     return `
-      <div class="message message-bubble ${outgoing ? "sent" : "received"}">
+      <div class="message ${isMe ? "sent" : "received"}">
         <div class="message-content">
           ${content}
         </div>
-        <div class="message-time">
-          ${formatTime(message.createdAt)} ${statusText}
+        <div class="meta">
+          ${formatTime(message.createdAt)} ${tickHtml}
         </div>
       </div>
     `;
@@ -1316,6 +1333,10 @@ const ensureChat = async (peer) => {
 const openConversation = async (peer, chatId = "") => {
   if (!peer) return;
 
+  if (window.innerWidth <= 768) {
+    document.querySelector(".sidebar")?.classList.add("hidden-mobile");
+  }
+
   if (state.typingTimer) clearTimeout(state.typingTimer);
   if (state.isTyping) {
     state.isTyping = false;
@@ -1334,7 +1355,7 @@ const openConversation = async (peer, chatId = "") => {
     state.activePeer = { ...state.activePeer, ...peerStatus };
     setChatHeader(state.activePeer);
   });
-  listenTyping(state.activeChatId, peer.uid, (isTyping) => {
+  listenTyping(state.activeChatId, (isTyping) => {
     state.peerTyping = isTyping;
     setChatHeader(state.activePeer);
   });
@@ -1367,6 +1388,7 @@ const sendMessage = async (event) => {
       ciphertext: encrypted.ciphertext,
       iv: encrypted.iv,
       createdAt: serverTimestamp(),
+      deliveredTo: [state.currentUser.uid],
       readBy: [state.currentUser.uid]
     });
 
@@ -1460,18 +1482,28 @@ const bindEvents = () => {
   });
 
   // Theme toggle
-  els.themeToggle?.addEventListener("click", () => {
-    const isLight = document.body.classList.contains("light-mode");
-    const newTheme = isLight ? "dark" : "light";
-    document.body.classList.toggle("light-mode", !isLight);
-    localStorage.setItem("orbi-theme", newTheme);
-    console.log("Theme changed to:", newTheme);
-  });
+  const toggle = els.themeToggle;
+  if (toggle) {
+    toggle.onclick = () => {
+      document.body.classList.toggle("dark-mode");
+      localStorage.setItem(
+        "theme",
+        document.body.classList.contains("dark-mode") ? "dark" : "light"
+      );
+    };
+  }
+
+  const sidebarEl = document.querySelector(".sidebar");
+  const backBtn = document.querySelector(".mobile-sidebar-toggle");
+  if (backBtn && sidebarEl) {
+    backBtn.addEventListener("click", () => {
+      sidebarEl.classList.remove("hidden-mobile");
+    });
+  }
 
   // Load saved theme on page load
-  const savedTheme = localStorage.getItem("orbi-theme");
-  if (savedTheme === "light") {
-    document.body.classList.add("light-mode");
+  if (localStorage.getItem("theme") === "dark") {
+    document.body.classList.add("dark-mode");
   }
 
   els.searchBtn?.addEventListener("click", async () => {
@@ -1812,11 +1844,27 @@ document.addEventListener("DOMContentLoaded", () => {
   console.log("[Init] emailSearchInput:", els.requestEmail);
   console.log("[Init] themeToggle:", els.themeToggle);
   
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await signOut(auth);
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.href = "login.html";
+      } catch (error) {
+        console.error("Logout error:", error);
+        alert("Failed to logout. Try again.");
+      }
+    });
+  }
+  
   bindEvents();
 
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
       console.log("[Auth] No user found, redirecting to login");
+      window.location.href = "login.html";
       return;
     }
 
