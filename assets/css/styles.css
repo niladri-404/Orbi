@@ -179,13 +179,6 @@ button:disabled {
 
 
 
-body.light-mode .topbar {
-
-  background: rgba(247, 251, 255, 0.75);
-
-}
-
-
 
 .topbar-inner {
 
@@ -761,13 +754,6 @@ p {
 
 }
 
-
-
-body.light-mode .preview-window {
-
-  background: rgba(255, 255, 255, 0.78);
-
-}
 
 
 
@@ -1847,13 +1833,6 @@ select:focus {
 
 }
 
-
-
-body.light-mode .sidebar {
-
-  background: rgba(255, 255, 255, 0.92);
-
-}
 
 
 

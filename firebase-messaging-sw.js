@@ -1,8 +1,7 @@
-importScripts('https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js');
-importScripts('https://www.gstatic.com/firebasejs/12.7.0/firebase-messaging.js');
+importScripts('https://www.gstatic.com/firebasejs/12.7.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/12.7.0/firebase-messaging-compat.js');
 
-// Replace these placeholders with your Firebase web app config from:
-// Firebase Console > Project settings > General > Your apps > SDK setup and configuration.
+// Firebase configuration
 const firebaseConfig = {
   apiKey: "AIzaSyCgrjFJBMGns3qizxGogAiq8CCbQP9lyX4",
   authDomain: "orbi-77b43.firebaseapp.com",
@@ -14,19 +13,19 @@ const firebaseConfig = {
 };
 
 firebase.initializeApp(firebaseConfig);
-
 const messaging = firebase.messaging();
+console.log('[SW] Firebase Messaging service worker initialized');
 
 // Handle background messages
 messaging.onBackgroundMessage((payload) => {
-  console.log('Received background message ', payload);
+  console.log('[SW] Received background message', payload);
 
-  const notificationTitle = payload.notification.title;
+  const notificationTitle = payload.notification?.title || 'New Message';
   const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/favicon.ico', // Add your app icon
+    body: payload.notification?.body || '',
+    icon: '/favicon.ico',
     badge: '/favicon.ico',
-    tag: 'orbi-message', // Group notifications
+    tag: 'orbi-message',
     requireInteraction: true,
     actions: [
       {
@@ -39,14 +38,12 @@ messaging.onBackgroundMessage((payload) => {
   return self.registration.showNotification(notificationTitle, notificationOptions);
 });
 
-// Handle notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
   if (event.action === 'open') {
-    // Open the app
-    event.waitUntil(
-      clients.openWindow('/')
-    );
+    event.waitUntil(clients.openWindow('/'));
+  } else {
+    event.waitUntil(clients.openWindow('/'));
   }
 });

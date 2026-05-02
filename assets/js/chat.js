@@ -1236,12 +1236,21 @@ const renderMessages = (messages) => {
   }
 
   els.chatStream.innerHTML = messages.map((message) => {
-    const isMe =
-      message.senderId === state.currentUser.uid ||
-      message.senderId === state.currentUser.email; // fallback for old data
+    const currentUid = state.currentUser.uid;
+    const currentEmail = state.currentUser.email;
 
+    if (message.senderId === currentEmail) {
+      message.senderId = currentUid;
+    }
+
+    const isMe =
+      message.senderId &&
+      (message.senderId === currentUid || message.senderId === currentEmail);
+
+    const messageClass = `message ${isMe ? "sent" : "received"}`;
+    console.log("CLASS:", messageClass);
     console.log("MSG sender:", message.senderId);
-    console.log("ME:", state.currentUser.uid);
+    console.log("ME:", currentUid);
 
     const tickStatus = getTickStatus(message);
     const tickHtml = isMe ? `<span class="tick ${tickStatus.includes('read') ? 'read' : ''}">${tickStatus.replace(' read', '')}</span>` : "";
@@ -1266,7 +1275,7 @@ const renderMessages = (messages) => {
 
     return `
       <div class="message ${isMe ? "sent" : "received"}">
-        <div class="message-content">
+        <div class="bubble">
           ${content}
         </div>
         <div class="meta">
