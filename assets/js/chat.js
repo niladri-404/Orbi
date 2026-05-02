@@ -7,7 +7,9 @@
   - messages subcollection stores the conversation history
 */
 
-import { auth, db, isFirebaseConfigured } from "./firebase-config.js";
+import { auth, db, storage, messaging, isFirebaseConfigured } from "./firebase-config.js";
+
+console.log("Chat JS loaded successfully");
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import {
   addDoc,
@@ -27,6 +29,15 @@ import {
   updateDoc,
   where
 } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import {
+  getToken,
+  onMessage
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-messaging.js";
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
@@ -45,12 +56,21 @@ const state = {
   peerTyping: false,
   presenceListenersAttached: false,
   incomingRequests: [],
+  outgoingRequests: [],
   unsubChats: null,
   unsubMessages: null,
   unsubContacts: null,
   unsubIncoming: null,
   unsubPeerStatus: null,
-  unsubPeerTyping: null
+  unsubPeerTyping: null,
+  // Media recording state
+  mediaRecorder: null,
+  recordedChunks: [],
+  recordingStartTime: null,
+  recordingTimer: null,
+  voicePreviewBlob: null,
+  // Notification state
+  fcmToken: null
 };
 
 
@@ -59,26 +79,53 @@ const els = {
   sidebarBackdrop: $("[data-sidebar-backdrop]"),
   sidebarToggleButtons: $$('[data-sidebar-toggle]'),
   contactList: $("[data-contact-list]"),
-  conversationList: $("[data-conversation-list]"),
-  userSearch: $("[data-user-search]"),
+  conversationList: $("#chatList"),
+  userSearch: $("#chatSearchInput"),
   inviteButton: $("[data-invite-button]"),
   requestsToggle: $("[data-requests-toggle]"),
   requestsPanel: $("[data-requests-panel]"),
   requestForm: $("[data-request-form]"),
-  requestEmail: $("[data-request-email]"),
-  requestList: $("[data-request-list]"),
+  requestEmail: $("#searchInput"),
+  searchBtn: $("#searchBtn"),
+  searchResult: $("#searchResult"),
+  requestList: $("#requestList"),
+  sentRequestList: $("[data-sent-request-list]"),
   removeContactBtn: $("[data-remove-contact]"),
   blockContactBtn: $("[data-block-contact]"),
   chatTitle: $("[data-chat-title]"),
   chatSubtitle: $("[data-chat-subtitle]"),
   chatAvatar: $("[data-chat-avatar]"),
-  userStatus: $("#user-status"),
-  typingIndicator: $("#typing-indicator"),
-  chatStream: $("[data-chat-stream]"),
+  userStatus: $("[data-user-status]"),
+  typingIndicator: $("[data-typing-indicator]"),
+  chatStream: $("#messages"),
   composer: $("[data-composer]"),
-  messageInput: $("[data-message-input]"),
-  sendButton: $("[data-send-message]"),
-  pageMessage: $("[data-page-message]")
+  messageInput: $("#messageInput"),
+  sendButton: $("#sendBtn"),
+  pageMessage: $("[data-page-message]"),
+  userName: $("#userName"),
+  userAvatar: $("[data-user-avatar]"),
+  themeToggle: $("#themeToggle"),
+  // New media elements
+  attachBtn: $("#attachBtn"),
+  attachButton: $("[data-attach-button]"),
+  fileInput: $("#fileInput"),
+  imageInput: $("[data-image-input]"),
+  voiceButton: $("[data-voice-button]"),
+  // Modals
+  imageModal: $("[data-image-modal]"),
+  previewImage: $("[data-preview-image]"),
+  sendImageBtn: $("[data-send-image]"),
+  cancelImageBtn: $("[data-cancel-image]"),
+  fullscreenModal: $("[data-fullscreen-modal]"),
+  fullscreenImage: $("[data-fullscreen-image]"),
+  voiceModal: $("[data-voice-modal]"),
+  recordingIndicator: $("[data-recording-indicator]"),
+  recordingTimer: $("[data-recording-timer]"),
+  previewAudio: $("[data-preview-audio]"),
+  sendVoiceBtn: $("[data-send-voice]"),
+  cancelVoiceBtn: $("[data-cancel-voice]"),
+  // Toast notifications
+  toastContainer: $("[data-toast-container]")
 };
 
 // Helpers for safe text output and formatting timestamps for chat messages.
@@ -260,6 +307,7 @@ const formatPresenceLabel = (user) => {
 
 const updateOwnPresence = async (status) => {
   if (!state.currentUser) return;
+  console.log("Presence updated:", status, "for", state.currentUser.uid);
   await setDoc(doc(db, "users", state.currentUser.uid), {
     status,
     lastSeen: serverTimestamp()
@@ -382,7 +430,7 @@ const acceptInvite = async (inviteId) => {
   });
 };
 
-const searchUserByEmail = async (email) => {
+const findUserByEmail = async (email) => {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) throw new Error("Enter an email to search.");
   if (!normalizedEmail.includes("@")) throw new Error("Please enter a valid email address.");
@@ -405,7 +453,7 @@ const searchUserByEmail = async (email) => {
   
   console.log("[Search] Found user:", { uid: userDoc.id, name: userData.name, email: userData.email });
 
-  if (userDoc.id === state.currentUser.uid) {
+  if (userDoc.id === state.currentUser?.uid) {
     console.log("[Search] User tried to search themselves:", state.currentUser.uid);
     throw new Error("You cannot send a request to yourself.");
   }
@@ -413,13 +461,75 @@ const searchUserByEmail = async (email) => {
   return { uid: userDoc.id, ...userData };
 };
 
+const searchUserByEmail = findUserByEmail;
+
+const showSearchResult = (user, errorMessage = null) => {
+  const resultEl = els.searchResult;
+  if (!resultEl) return;
+
+  if (errorMessage || !user) {
+    resultEl.innerHTML = `
+      <div class="search-error">
+        <strong>User not found</strong>
+        <span>${errorMessage || "No user found with this email address."}</span>
+      </div>
+    `;
+  } else {
+    const alreadyConnected = isContact(user.uid);
+    const requestPending = state.outgoingRequests.some((request) => request.toUid === user.uid);
+    const buttonLabel = alreadyConnected ? "Already connected" : requestPending ? "Request pending" : "Send Request";
+    const buttonDisabled = alreadyConnected || requestPending ? "disabled" : "";
+    const statusNote = alreadyConnected
+      ? "You are already connected with this user."
+      : requestPending
+        ? "A connection request is already pending."
+        : "";
+
+    resultEl.innerHTML = `
+      <div class="search-user-card">
+        <div class="avatar">${initials(user.name, user.email)}</div>
+        <div class="user-info">
+          <h4>${escapeHTML(user.name || "Orbi User")}</h4>
+          <span>${escapeHTML(user.email)}</span>
+        </div>
+        <button class="button primary send-request-btn" ${buttonDisabled}>${buttonLabel}</button>
+      </div>
+      ${statusNote ? `<p class="search-user-status">${escapeHTML(statusNote)}</p>` : ""}
+    `;
+
+    const sendBtn = resultEl.querySelector(".send-request-btn");
+    sendBtn?.addEventListener("click", async () => {
+      if (alreadyConnected) {
+        showMessage("You are already connected with this user.", "info");
+        return;
+      }
+      if (requestPending) {
+        showMessage("A request is already pending.", "info");
+        return;
+      }
+
+      try {
+        await sendConnectionRequest(user.email);
+        showMessage("Request sent. Waiting for the other user to accept.", "success");
+        resultEl.hidden = true;
+        els.requestEmail.value = "";
+      } catch (error) {
+        showMessage(error.message || "Unable to send request.", "error");
+      }
+    });
+  }
+
+  resultEl.hidden = false;
+};
+
 const checkExistingRequest = async (targetUid) => {
   if (!state.currentUser) return false;
-  
+
   try {
-    const outgoingRef = doc(db, "requests", state.currentUser.uid, "outgoing", targetUid);
-    const existing = await getDoc(outgoingRef);
-    return existing.exists();
+    const outgoingRef = collection(db, "requests", state.currentUser.uid, "outgoing");
+    const requestQuery = query(outgoingRef, where("toUid", "==", targetUid));
+    const snapshot = await getDocs(requestQuery);
+    return !snapshot.empty;
   } catch (error) {
     console.log("[Request] Error checking existing request:", error.message);
     return false;
@@ -433,13 +543,7 @@ const sendConnectionRequest = async (email) => {
 
   console.log("[Request] Sending request from:", state.currentUser.uid);
 
-  let target;
-  try {
-    target = await searchUserByEmail(email);
-  } catch (searchError) {
-    console.log("[Request] Search failed:", searchError.message);
-    throw searchError;
-  }
+  const target = await searchUserByEmail(email);
 
   if (isContact(target.uid)) {
     console.log("[Request] User already in contacts:", target.uid);
@@ -452,32 +556,56 @@ const sendConnectionRequest = async (email) => {
     throw new Error(`Request already sent to ${target.email}. Please wait for them to accept.`);
   }
 
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const payload = {
     fromUid: state.currentUser.uid,
-    fromName: state.currentProfile?.name || state.currentUser.displayName || "Orbi User",
     fromEmail: state.currentUser.email || "",
+    fromName: state.currentProfile?.name || state.currentUser.displayName || "Orbi User",
     toUid: target.uid,
-    toName: target.name || target.email || "Orbi User",
     toEmail: target.email || "",
+    toName: target.name || target.email || "Orbi User",
+    status: "pending",
     createdAt: serverTimestamp()
   };
 
-  console.log("[Request] Creating request payload:", payload);
+  console.log("[Request] Creating request payload:", payload, "requestId:", requestId);
 
   try {
-    const outgoingDoc = doc(db, "requests", state.currentUser.uid, "outgoing", target.uid);
-    const incomingDoc = doc(db, "requests", target.uid, "incoming", state.currentUser.uid);
+    const outgoingDoc = doc(db, "requests", state.currentUser.uid, "outgoing", requestId);
+    const incomingDoc = doc(db, "requests", target.uid, "incoming", requestId);
 
     await Promise.all([
-      setDoc(outgoingDoc, payload, { merge: true }),
-      setDoc(incomingDoc, payload, { merge: true })
+      setDoc(outgoingDoc, {
+        toUid: payload.toUid,
+        toEmail: payload.toEmail,
+        toName: payload.toName,
+        status: payload.status,
+        createdAt: payload.createdAt
+      }, { merge: true }),
+      setDoc(incomingDoc, {
+        fromUid: payload.fromUid,
+        fromEmail: payload.fromEmail,
+        fromName: payload.fromName,
+        status: payload.status,
+        createdAt: payload.createdAt
+      }, { merge: true })
     ]);
 
-    console.log("[Request] Successfully sent to:", target.uid);
+    console.log("[Request] Successfully sent request with id:", requestId);
   } catch (writeError) {
     console.error("[Request] Firestore write failed:", writeError);
     throw new Error(`Failed to send request: ${writeError.message}`);
   }
+};
+
+const sendRequest = sendConnectionRequest;
+
+window.sendRequest = async (targetUid, targetEmail) => {
+  console.log("[Search] sendRequest called:", targetUid, targetEmail);
+  if (!targetEmail) {
+    throw new Error("Invalid target email.");
+  }
+  return sendConnectionRequest(targetEmail);
 };
 
 const listenIncomingRequests = () => {
@@ -489,18 +617,35 @@ const listenIncomingRequests = () => {
       id: docSnapshot.id,
       ...docSnapshot.data()
     }));
-    renderRequests();
-  }, () => {
-    renderRequests();
+    renderIncomingRequests();
+  }, (error) => {
+    console.error("[Request] Incoming snapshot failed:", error);
+    renderIncomingRequests();
   });
 };
 
-const renderRequests = () => {
+const listenOutgoingRequests = () => {
+  if (!state.currentUser) return;
+
+  const requestsRef = outgoingRequestsRef(state.currentUser.uid);
+  state.unsubOutgoing = onSnapshot(requestsRef, (snapshot) => {
+    state.outgoingRequests = snapshot.docs.map((docSnapshot) => ({
+      id: docSnapshot.id,
+      ...docSnapshot.data()
+    }));
+    renderOutgoingRequests();
+  }, (error) => {
+    console.error("[Request] Outgoing snapshot failed:", error);
+    renderOutgoingRequests();
+  });
+};
+
+const renderIncomingRequests = () => {
   if (!els.requestList) return;
   if (!state.incomingRequests.length) {
     els.requestList.innerHTML = `
       <div class="empty-state">
-        <strong>No requests</strong>
+        <strong>No incoming requests</strong>
         <span>Incoming connection requests will appear here.</span>
       </div>
     `;
@@ -521,21 +666,75 @@ const renderRequests = () => {
   `).join("");
 };
 
+const renderOutgoingRequests = () => {
+  if (!els.sentRequestList) return;
+  if (!state.outgoingRequests?.length) {
+    els.sentRequestList.innerHTML = `
+      <div class="empty-state">
+        <strong>No sent requests</strong>
+        <span>Requests you send will appear here.</span>
+      </div>
+    `;
+    return;
+  }
+
+  els.sentRequestList.innerHTML = state.outgoingRequests.map((request) => `
+    <div class="request-card outgoing" data-request-id="${request.id}" data-request-to="${request.toUid}">
+      <div class="request-copy">
+        <strong>${escapeHTML(request.toName)}</strong>
+        <span>${escapeHTML(request.toEmail)}</span>
+      </div>
+      <div class="request-actions">
+        <span class="request-status">${escapeHTML(request.status || "pending")}</span>
+        <button class="button secondary" type="button" data-cancel-request="${request.id}">Cancel</button>
+      </div>
+    </div>
+  `).join("");
+};
+
 const acceptConnectionRequest = async (requestId, request) => {
   if (!state.currentUser || !request) return;
+
+  console.log("[Request] Accepting request:", requestId, request);
   await addMutualContacts({ uid: request.fromUid, name: request.fromName, email: request.fromEmail });
+
   await Promise.all([
     deleteDoc(doc(db, "requests", state.currentUser.uid, "incoming", requestId)),
-    deleteDoc(doc(db, "requests", request.fromUid, "outgoing", state.currentUser.uid))
+    deleteDoc(doc(db, "requests", request.fromUid, "outgoing", requestId))
   ]);
+
+  const chatPeer = {
+    uid: request.fromUid,
+    name: request.fromName,
+    email: request.fromEmail
+  };
+
+  if (!state.contacts.some((contact) => contact.uid === chatPeer.uid)) {
+    state.contacts.push({
+      uid: chatPeer.uid,
+      name: chatPeer.name,
+      email: chatPeer.email,
+      status: "online",
+      addedAt: Date.now()
+    });
+    renderContacts();
+  }
+
+  const chatId = await ensureChat(chatPeer);
+  await openConversation(chatPeer, chatId);
+  showStatus("Request accepted.", "success");
+  return chatId;
 };
 
 const rejectConnectionRequest = async (requestId, request) => {
   if (!state.currentUser || !request) return;
+
+  console.log("[Request] Rejecting request:", requestId, request);
   await Promise.all([
     deleteDoc(doc(db, "requests", state.currentUser.uid, "incoming", requestId)),
-    deleteDoc(doc(db, "requests", request.fromUid, "outgoing", state.currentUser.uid))
+    deleteDoc(doc(db, "requests", request.fromUid, "outgoing", requestId))
   ]);
+  showStatus("Request rejected.", "warning");
 };
 
 const removeContact = async (contactUid) => {
@@ -702,10 +901,9 @@ const renderContacts = () => {
 
   els.contactList.innerHTML = contacts.map((contact) => {
     const statusLabel = formatPresenceLabel(contact);
-    const statusClass = contact.status === "online" ? "online" : "offline";
     return `
-      <button class="thread contact-thread" type="button" data-open-user="${contact.uid}">
-        <div class="thread-avatar">${initials(contact.name, contact.email)}</div>
+      <div class="thread contact-thread" data-open-user="${contact.uid}">
+        <div class="avatar">${initials(contact.name, contact.email)}</div>
         <div class="thread-copy">
           <div class="thread-head">
             <h3>${escapeHTML(contact.name || "Orbi User")}</h3>
@@ -713,8 +911,7 @@ const renderContacts = () => {
           </div>
           <p>${escapeHTML(contact.email)}</p>
         </div>
-        <span class="status-dot ${statusClass}"></span>
-      </button>
+      </div>
     `;
   }).join("");
 };
@@ -723,10 +920,7 @@ const renderContacts = () => {
 // Render the conversation list with unread counts and last message previews.
 const renderConversations = () => {
   const chats = [...state.chats.values()]
-    .filter((chat) => {
-      const peer = peerFromChat(chat);
-      return peer && isContact(peer.uid);
-    })
+    .filter((chat) => peerFromChat(chat))
     .sort((a, b) => toMillis(b.updatedAt || b.lastMessageAt) - toMillis(a.updatedAt || a.lastMessageAt));
 
   if (!chats.length) {
@@ -740,8 +934,8 @@ const renderConversations = () => {
     const active = chat.id === state.activeChatId ? " active" : "";
     const preview = chat.lastMessageCiphertext ? "Encrypted message" : (chat.lastMessage || "No messages yet");
     return `
-      <button class="thread conversation-thread${active}" type="button" data-open-chat="${chat.id}">
-        <div class="thread-avatar">${initials(peer?.name, peer?.email)}</div>
+      <div class="thread conversation-thread${active}" data-open-chat="${chat.id}">
+        <div class="avatar">${initials(peer?.name, peer?.email)}</div>
         <div class="thread-copy">
           <div class="thread-head">
             <h3>${escapeHTML(peer?.name || "Unknown user")}</h3>
@@ -750,7 +944,7 @@ const renderConversations = () => {
           <p>${escapeHTML(preview)}</p>
         </div>
         ${unread > 0 ? `<span class="unread-badge">${unread}</span>` : ""}
-      </button>
+      </div>
     `;
   }).join("");
 };
@@ -769,7 +963,6 @@ const setChatHeader = (peer) => {
       els.typingIndicator.hidden = true;
     }
     if (els.removeContactBtn) els.removeContactBtn.hidden = true;
-    if (els.blockContactBtn) els.blockContactBtn.hidden = true;
     els.messageInput.disabled = true;
     els.sendButton.disabled = true;
     return;
@@ -779,8 +972,6 @@ const setChatHeader = (peer) => {
   const presenceText = formatPresenceLabel(peer);
 
   if (els.removeContactBtn) els.removeContactBtn.hidden = false;
-  if (els.blockContactBtn) els.blockContactBtn.hidden = false;
-  const presenceText = formatPresenceLabel(peer);
 
   els.chatTitle.textContent = safeText(peer.name, "Orbi User");
   els.chatSubtitle.textContent = safeText(peer.email, "Secure one-to-one chat");
@@ -795,6 +986,204 @@ const setChatHeader = (peer) => {
   els.messageInput.disabled = false;
   els.sendButton.disabled = false;
   els.messageInput.focus();
+};
+
+const updateUserProfileUI = () => {
+  if (!state.currentProfile) return;
+  if (els.userName) {
+    els.userName.textContent = safeText(state.currentProfile.name, "Orbi User");
+  }
+  if (els.userAvatar) {
+    els.userAvatar.textContent = initials(state.currentProfile.name, state.currentProfile.email);
+  }
+  if (els.userStatus) {
+    els.userStatus.textContent = formatPresenceLabel(state.currentProfile);
+  }
+};
+
+// Media handling functions
+const uploadFile = async (file, path) => {
+  const storageRef = ref(storage, path);
+  const snapshot = await uploadBytes(storageRef, file);
+  return await getDownloadURL(snapshot.ref);
+};
+
+const sendImageMessage = async (imageUrl) => {
+  if (!state.activeChatId || !state.currentUser) return;
+
+  await addDoc(collection(db, "chats", state.activeChatId, "messages"), {
+    type: "image",
+    imageUrl,
+    text: "📷 Image", // For display purposes
+    senderId: state.currentUser.uid,
+    createdAt: serverTimestamp(),
+    deliveredAt: null,
+    readBy: []
+  });
+
+  await updateDoc(doc(db, "chats", state.activeChatId), {
+    lastMessage: "📷 Image",
+    lastMessageAt: serverTimestamp(),
+    lastMessageSenderId: state.currentUser.uid
+  });
+};
+
+const sendAudioMessage = async (audioUrl, duration) => {
+  if (!state.activeChatId || !state.currentUser) return;
+
+  await addDoc(collection(db, "chats", state.activeChatId, "messages"), {
+    type: "audio",
+    audioUrl,
+    duration,
+    text: "🎤 Voice message", // For display purposes
+    senderId: state.currentUser.uid,
+    createdAt: serverTimestamp(),
+    deliveredAt: null,
+    readBy: []
+  });
+
+  await updateDoc(doc(db, "chats", state.activeChatId), {
+    lastMessage: "🎤 Voice message",
+    lastMessageAt: serverTimestamp(),
+    lastMessageSenderId: state.currentUser.uid
+  });
+};
+
+// Voice recording functions
+const startRecording = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.mediaRecorder = new MediaRecorder(stream);
+    state.recordedChunks = [];
+    state.recordingStartTime = Date.now();
+    state.voicePreviewBlob = null;
+
+    state.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        state.recordedChunks.push(event.data);
+      }
+    };
+
+    state.mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(track => track.stop());
+    };
+
+    state.mediaRecorder.start();
+    updateRecordingTimer();
+    if (els.previewAudio) {
+      els.previewAudio.src = "";
+      els.previewAudio.hidden = true;
+      els.previewAudio.controls = false;
+    }
+    if (els.sendVoiceBtn) {
+      els.sendVoiceBtn.textContent = "Stop recording";
+    }
+    els.voiceModal.hidden = false;
+  } catch (error) {
+    console.error("Recording failed:", error);
+    showToast("Microphone access denied", "error");
+  }
+};
+
+const stopRecording = () => {
+  if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+    return new Promise((resolve) => {
+      state.mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(state.recordedChunks, { type: "audio/webm" });
+        const duration = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+        state.voicePreviewBlob = audioBlob;
+        state.mediaRecorder = null;
+        clearInterval(state.recordingTimer);
+        resolve({ blob: audioBlob, duration });
+      };
+      state.mediaRecorder.stop();
+    });
+  }
+  return Promise.resolve(null);
+};
+
+const updateRecordingTimer = () => {
+  const updateTimer = () => {
+    const elapsed = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+    const minutes = Math.floor(elapsed / 60);
+    const seconds = elapsed % 60;
+    els.recordingTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+  updateTimer();
+  state.recordingTimer = setInterval(updateTimer, 1000);
+};
+
+// Image handling functions
+const handleImageSelect = (file) => {
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    els.previewImage.src = e.target.result;
+    els.imageModal.hidden = false;
+  };
+  reader.readAsDataURL(file);
+};
+
+// Notification functions
+const requestNotificationPermission = async () => {
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      const token = await getToken(messaging, {
+        vapidKey: "YOUR_VAPID_KEY_HERE" // You'll need to generate this
+      });
+      if (token) {
+        state.fcmToken = token;
+        await saveFCMToken(token);
+      }
+    }
+  } catch (error) {
+    console.error("Notification permission failed:", error);
+  }
+};
+
+const saveFCMToken = async (token) => {
+  if (!state.currentUser) return;
+  await setDoc(doc(db, "users", state.currentUser.uid), {
+    fcmToken: token
+  }, { merge: true });
+};
+
+const showToast = (message, type = "info") => {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  els.toastContainer.appendChild(toast);
+
+  setTimeout(() => {
+    toast.remove();
+  }, 5000);
+};
+
+// Global functions for onclick handlers
+window.openFullscreen = (url) => {
+  els.fullscreenImage.src = url;
+  els.fullscreenModal.hidden = false;
+};
+
+window.playAudio = (button, url) => {
+  const audio = new Audio(url);
+  audio.play();
+
+  button.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+    </svg>
+  `;
+
+  audio.onended = () => {
+    button.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+    `;
+  };
 };
 
 const markMessagesDelivered = async (messages) => {
@@ -834,28 +1223,39 @@ const renderMessages = (messages) => {
     const outgoing = message.senderId === state.currentUser.uid;
     const statusText = outgoing
       ? message.readBy?.includes(state.activePeer?.uid)
-        ? "✔✔ Seen"
+        ? "✔✔"
         : message.deliveredAt
-          ? "✔ Sent"
-          : "⌛ Sending"
-      : "";
-    const statusClass = outgoing
-      ? message.readBy?.includes(state.activePeer?.uid)
-        ? "seen"
-        : message.deliveredAt
-          ? "sent"
-          : "info"
+          ? "✔"
+          : "⌛"
       : "";
 
-    return `
-      <article class="chat-message ${outgoing ? "outgoing" : ""}">
-        <div class="avatar ${outgoing ? "" : "purple"}">${outgoing ? "You" : initials(state.activePeer?.name, state.activePeer?.email)}</div>
-        <div class="message-content">
-          <p>${escapeHTML(message.text)}</p>
-          <span class="message-time">${formatTime(message.createdAt)}</span>
-          ${statusText ? `<span class="message-status ${statusClass}">${statusText}</span>` : ""}
+    let content = "";
+    if (message.type === "image") {
+      content = `<img src="${escapeHTML(message.imageUrl)}" alt="Image" class="message-image" onclick="openFullscreen('${escapeHTML(message.imageUrl)}')" />`;
+    } else if (message.type === "audio") {
+      content = `
+        <div class="message-audio">
+          <button class="audio-play" onclick="playAudio(this, '${escapeHTML(message.audioUrl)}')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <span class="audio-duration">${message.duration || "0:00"}</span>
         </div>
-      </article>
+      `;
+    } else {
+      content = escapeHTML(message.text);
+    }
+
+    return `
+      <div class="message message-bubble ${outgoing ? "sent" : "received"}">
+        <div class="message-content">
+          ${content}
+        </div>
+        <div class="message-time">
+          ${formatTime(message.createdAt)} ${statusText}
+        </div>
+      </div>
     `;
   }).join("");
   els.chatStream.scrollTop = els.chatStream.scrollHeight;
@@ -914,10 +1314,7 @@ const ensureChat = async (peer) => {
 };
 
 const openConversation = async (peer, chatId = "") => {
-  if (!peer || !isContact(peer.uid)) {
-    showMessage("You can only chat with users in your contacts.", "warning");
-    return;
-  }
+  if (!peer) return;
 
   if (state.typingTimer) clearTimeout(state.typingTimer);
   if (state.isTyping) {
@@ -1057,6 +1454,52 @@ const bindEvents = () => {
     }
   });
 
+  els.requestsToggle?.addEventListener("click", () => {
+    els.requestsPanel.classList.toggle("open");
+    els.requestsPanel.hidden = !els.requestsPanel.classList.contains("open");
+  });
+
+  // Theme toggle
+  els.themeToggle?.addEventListener("click", () => {
+    const isLight = document.body.classList.contains("light-mode");
+    const newTheme = isLight ? "dark" : "light";
+    document.body.classList.toggle("light-mode", !isLight);
+    localStorage.setItem("orbi-theme", newTheme);
+    console.log("Theme changed to:", newTheme);
+  });
+
+  // Load saved theme on page load
+  const savedTheme = localStorage.getItem("orbi-theme");
+  if (savedTheme === "light") {
+    document.body.classList.add("light-mode");
+  }
+
+  els.searchBtn?.addEventListener("click", async () => {
+    const email = els.requestEmail?.value.trim();
+    console.log("Search input:", email);
+    if (!email) {
+      showMessage("Enter an email address to search.", "error");
+      return;
+    }
+
+    try {
+      const user = await searchUserByEmail(email);
+      console.log("User found:", user);
+      showSearchResult(user);
+    } catch (error) {
+      console.log("Search error:", error.message);
+      showSearchResult(null, error.message);
+    }
+  });
+
+  // Also allow Enter key in email input to trigger search
+  els.requestEmail?.addEventListener("keypress", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      els.searchBtn?.click();
+    }
+  });
+
   els.requestForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const email = els.requestEmail?.value.trim();
@@ -1082,7 +1525,6 @@ const bindEvents = () => {
       const request = state.incomingRequests.find((item) => item.id === requestId);
       if (request) {
         await acceptConnectionRequest(requestId, request);
-        showMessage("Request accepted.", "success");
       }
     }
     if (rejectButton) {
@@ -1090,16 +1532,27 @@ const bindEvents = () => {
       const request = state.incomingRequests.find((item) => item.id === requestId);
       if (request) {
         await rejectConnectionRequest(requestId, request);
-        showMessage("Request rejected.", "warning");
       }
     }
   });
 
-  els.requestsToggle?.addEventListener("click", () => {
-    if (!els.requestsPanel) return;
-    const isOpen = els.requestsPanel.classList.toggle("open");
-    els.requestsPanel.hidden = !isOpen;
-    els.requestsToggle.textContent = isOpen ? "Hide requests" : "Show requests";
+  els.sentRequestList?.addEventListener("click", async (event) => {
+    const cancelButton = event.target.closest("[data-cancel-request]");
+    if (!cancelButton) return;
+    const requestId = cancelButton.dataset.cancelRequest;
+    const request = state.outgoingRequests.find((item) => item.id === requestId);
+    if (!request) return;
+
+    try {
+      await Promise.all([
+        deleteDoc(doc(db, "requests", state.currentUser.uid, "outgoing", requestId)),
+        deleteDoc(doc(db, "requests", request.toUid, "incoming", requestId))
+      ]);
+      showMessage("Request canceled.", "info");
+    } catch (error) {
+      console.error("[Request] Cancel failed:", error);
+      showMessage(`Unable to cancel request: ${error.message}`, "error");
+    }
   });
 
   els.sidebarToggleButtons?.forEach((button) => {
@@ -1136,27 +1589,185 @@ const bindEvents = () => {
     const peer = chat ? peerFromChat(chat) : null;
     if (peer) await openConversation(peer, chat.id);
   });
+
+  // Media event listeners
+  els.attachBtn?.addEventListener("click", () => {
+    els.fileInput?.click();
+  });
+
+  els.fileInput?.addEventListener("change", (event) => {
+    const file = event.target.files[0];
+    if (file) handleImageSelect(file);
+    event.target.value = "";
+  });
+
+  els.voiceButton?.addEventListener("click", startRecording);
+
+  // Modal event listeners
+  els.cancelImageBtn?.addEventListener("click", () => {
+    els.imageModal.hidden = true;
+  });
+
+  els.sendImageBtn?.addEventListener("click", async () => {
+    if (!els.previewImage.src) return;
+    
+    els.sendImageBtn.disabled = true;
+    try {
+      const response = await fetch(els.previewImage.src);
+      const blob = await response.blob();
+      const fileName = `image_${Date.now()}.jpg`;
+      const path = `images/${state.activeChatId}/${fileName}`;
+      const imageUrl = await uploadFile(blob, path);
+      await sendImageMessage(imageUrl);
+      els.imageModal.hidden = true;
+      showToast("Image sent!", "success");
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      showToast("Failed to send image", "error");
+    } finally {
+      els.sendImageBtn.disabled = false;
+    }
+  });
+
+  els.cancelVoiceBtn?.addEventListener("click", () => {
+    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+      state.mediaRecorder.stop();
+    }
+    clearInterval(state.recordingTimer);
+    state.voicePreviewBlob = null;
+    if (els.previewAudio) {
+      els.previewAudio.hidden = true;
+      els.previewAudio.src = "";
+    }
+    if (els.sendVoiceBtn) {
+      els.sendVoiceBtn.textContent = "Send voice";
+    }
+    els.voiceModal.hidden = true;
+  });
+
+  els.sendVoiceBtn?.addEventListener("click", async () => {
+    if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+      els.sendVoiceBtn.disabled = true;
+      const result = await stopRecording();
+      els.sendVoiceBtn.disabled = false;
+      if (!result || !result.blob) {
+        showToast("No audio was recorded.", "warning");
+        return;
+      }
+      if (els.previewAudio) {
+        els.previewAudio.src = URL.createObjectURL(result.blob);
+        els.previewAudio.hidden = false;
+        els.previewAudio.controls = true;
+      }
+      if (els.sendVoiceBtn) {
+        els.sendVoiceBtn.textContent = "Send voice";
+      }
+      return;
+    }
+
+    if (!state.voicePreviewBlob || !state.voicePreviewBlob.size) {
+      showToast("Record a voice message first.", "warning");
+      return;
+    }
+
+    els.sendVoiceBtn.disabled = true;
+    try {
+      const fileName = `audio_${Date.now()}.webm`;
+      const path = `audio/${state.activeChatId}/${fileName}`;
+      const audioUrl = await uploadFile(state.voicePreviewBlob, path);
+      const duration = Math.floor((Date.now() - state.recordingStartTime) / 1000);
+      const durationStr = `${Math.floor(duration / 60)}:${String(duration % 60).padStart(2, '0')}`;
+      await sendAudioMessage(audioUrl, durationStr);
+      els.voiceModal.hidden = true;
+      state.voicePreviewBlob = null;
+      showToast("Voice message sent!", "success");
+    } catch (error) {
+      console.error("Voice upload failed:", error);
+      showToast("Failed to send voice message", "error");
+    } finally {
+      els.sendVoiceBtn.disabled = false;
+    }
+  });
+
+  // Modal close handlers
+  document.addEventListener("click", (event) => {
+    if (event.target.matches("[data-modal-close], [data-modal-backdrop]")) {
+      els.imageModal.hidden = true;
+    }
+    if (event.target.matches("[data-voice-close], [data-voice-backdrop]")) {
+      if (state.mediaRecorder && state.mediaRecorder.state === "recording") {
+        state.mediaRecorder.stop();
+      }
+      clearInterval(state.recordingTimer);
+      state.voicePreviewBlob = null;
+      if (els.previewAudio) {
+        els.previewAudio.hidden = true;
+        els.previewAudio.src = "";
+      }
+      if (els.sendVoiceBtn) {
+        els.sendVoiceBtn.textContent = "Send voice";
+      }
+      els.voiceModal.hidden = true;
+    }
+    if (event.target.matches("[data-fullscreen-close], [data-fullscreen-backdrop]")) {
+      els.fullscreenModal.hidden = true;
+    }
+  });
 };
 
 // Initialize the chat dashboard after the user is authenticated.
 // This function loads the current user's profile, starts real-time listeners,
 // and prepares the UI for direct messaging.
 const initChat = async (user) => {
+  console.log("[Init] Starting chat initialization for user:", user.uid);
+  
   if (!isFirebaseConfigured) {
     showMessage("Firebase is not configured yet. Paste your project values into assets/js/firebase-config.js.", "error");
+    console.error("[Init] Firebase not configured");
     return;
   }
 
   state.currentUser = user;
   state.currentProfile = await profileFromUser(user);
+  console.log("[Init] User profile loaded:", state.currentProfile);
+  
+  updateUserProfileUI();
   setChatHeader(null);
   renderEmpty(els.contactList, "Loading contacts", "Loading your secure connections...");
   renderEmpty(els.conversationList, "Loading chats", "Listening for recent conversations...");
+  
+  console.log("[Init] Listening to real-time data...");
   listenContacts();
   listenChats();
   listenIncomingRequests();
+  listenOutgoingRequests();
+  
   await processInviteLink();
   await updateOwnPresence("online");
+  console.log("[Init] Presence set to online");
+
+  // Setup notifications
+  if ("Notification" in window) {
+    await requestNotificationPermission();
+    console.log("[Init] Notification permission requested");
+  }
+
+  // Register service worker for background notifications
+  if ("serviceWorker" in navigator) {
+    try {
+      await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+      console.log("[Init] Service worker registered successfully");
+    } catch (error) {
+      console.error("[Init] Service worker registration failed:", error);
+    }
+  }
+
+  // Listen for foreground messages
+  onMessage(messaging, (payload) => {
+    if (document.hidden) return; // Background messages handled by service worker
+    console.log("[Messaging] Foreground message received");
+    showToast(`${payload.notification.title}: ${payload.notification.body}`, "info");
+  });
 
   if (!state.presenceListenersAttached) {
     state.presenceListenersAttached = true;
@@ -1164,6 +1775,7 @@ const initChat = async (user) => {
     window.addEventListener("visibilitychange", () => {
       if (!state.currentUser) return;
       if (document.hidden) {
+        console.log("[Presence] User went offline");
         setTypingState(state.activeChatId, false).catch(() => {});
         updateDoc(doc(db, "users", state.currentUser.uid), {
           status: "offline",
@@ -1188,11 +1800,43 @@ const initChat = async (user) => {
 
 document.addEventListener("DOMContentLoaded", () => {
   if (!els.composer) return;
+  
+  // Debugging: Log all required IDs
+  console.log("[Init] Checking required elements:");
+  console.log("[Init] chatList:", els.conversationList);
+  console.log("[Init] messages:", els.chatStream);
+  console.log("[Init] messageInput:", els.messageInput);
+  console.log("[Init] sendBtn:", els.sendButton);
+  console.log("[Init] searchInput:", els.userSearch);
+  console.log("[Init] requestList:", els.requestList);
+  console.log("[Init] emailSearchInput:", els.requestEmail);
+  console.log("[Init] themeToggle:", els.themeToggle);
+  
   bindEvents();
 
-  onAuthStateChanged(auth, (user) => {
-    if (!user) return;
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+      console.log("[Auth] No user found, redirecting to login");
+      return;
+    }
+
+    console.log("[Auth] User logged in:", user.uid);
+
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        const nameEl = document.getElementById("userName");
+        if (nameEl) {
+          nameEl.innerText = data.name || user.email || "Orbi User";
+        }
+      }
+    } catch (error) {
+      console.error("[Auth] Failed to load user profile:", error);
+    }
+
     initChat(user).catch((error) => {
+      console.error("[Chat] Failed to start:", error);
       showMessage(`Chat failed to start: ${error.message}`, "error");
     });
   });

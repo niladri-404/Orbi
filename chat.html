@@ -8,151 +8,212 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="assets/css/styles.css" />
+    <link rel="stylesheet" href="assets/css/chat.css" />
   </head>
   <body data-page="chat">
-    <main class="app-body">
+    <div class="app-container">
+      <!-- Sidebar -->
       <aside class="sidebar" data-sidebar>
-        <div class="sidebar-top">
-          <a class="brand" href="index.html"><span class="brand-mark"></span><span>Orbi</span></a>
-          <button class="icon-button mobile-sidebar-toggle" type="button" data-sidebar-toggle aria-label="Close sidebar">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <div class="sidebar-header">
+          <div class="user-profile">
+            <div class="avatar" data-user-avatar>OR</div>
+            <div class="user-info">
+              <h3 id="userName" data-user-name>Loading...</h3>
+              <span data-user-status></span>
+            </div>
+          </div>
+          <button class="icon-button" data-sidebar-toggle aria-label="Toggle sidebar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button id="themeToggle" class="icon-button" aria-label="Toggle theme">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
         </div>
 
-        <nav class="app-nav" aria-label="Application navigation">
-          <a class="active" href="chat.html">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H11l-5 4v-4.2A3.5 3.5 0 0 1 5 12.3V6.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+        <div class="search-container">
+          <div class="search-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
             </svg>
-            Chats
-          </a>
-          <a href="settings.html">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8" />
-              <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.99l.05.05a2.1 2.1 0 0 1-2.97 2.97l-.05-.05A1.8 1.8 0 0 0 14.8 19.6a1.8 1.8 0 0 0-1.08 1.65V21.4a2.1 2.1 0 0 1-4.2 0v-.08A1.8 1.8 0 0 0 8.4 19.6a1.8 1.8 0 0 0-1.99.36l-.05.05a2.1 2.1 0 0 1-2.97-2.97l.05-.05A1.8 1.8 0 0 0 3.8 15a1.8 1.8 0 0 0-1.65-1.08H2.1a2.1 2.1 0 0 1 0-4.2h.08A1.8 1.8 0 0 0 3.8 8.6a1.8 1.8 0 0 0-.36-1.99l-.05-.05a2.1 2.1 0 0 1 2.97-2.97l.05.05A1.8 1.8 0 0 0 8.4 4a1.8 1.8 0 0 0 1.08-1.65V2.1a2.1 2.1 0 0 1 4.2 0v.08A1.8 1.8 0 0 0 14.8 4a1.8 1.8 0 0 0 1.99-.36l.05-.05a2.1 2.1 0 0 1 2.97 2.97l-.05.05A1.8 1.8 0 0 0 19.4 8.6a1.8 1.8 0 0 0 1.65 1.08h.08a2.1 2.1 0 0 1 0 4.2h-.08A1.8 1.8 0 0 0 19.4 15Z" stroke="currentColor" stroke-width="1.2" />
-            </svg>
-            Settings
-          </a>
-        </nav>
-
-        <div class="thread">
-          <div class="thread-head"><h3 data-user-name>Loading user...</h3><span class="thread-time" data-email-status></span></div>
-          <p data-user-email>Checking session</p>
-        </div>
-
-        <div class="search-box">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          </svg>
-          <input type="search" placeholder="Search contacts" data-user-search />
+            <input id="chatSearchInput" type="search" placeholder="Search chats" data-user-search />
+          </div>
         </div>
 
         <div class="connect-actions">
-          <button class="button secondary" type="button" data-invite-button>Copy invite link</button>
-          <button class="button secondary" type="button" data-requests-toggle>Show requests</button>
+          <button class="button secondary" type="button" data-invite-button>Invite</button>
+          <button class="button secondary" type="button" data-requests-toggle>Requests</button>
           <form class="request-form" data-request-form>
-            <input class="request-input" type="email" placeholder="Search by email" data-request-email aria-label="Email to connect" />
-            <button class="button primary" type="submit">Request</button>
+            <input id="searchInput" class="request-input" type="email" placeholder="Search by email" data-request-email aria-label="Email to connect" />
+            <button id="searchBtn" class="button secondary" type="button">Search</button>
+            <button id="sendRequestBtn" class="button primary" type="submit">Send</button>
           </form>
+          <div id="searchResult" class="search-result" hidden></div>
         </div>
 
         <div class="requests-panel" data-requests-panel hidden>
-          <p class="sidebar-label">Requests</p>
-          <div class="thread-list compact" aria-label="Incoming requests" data-request-list>
+          <p class="sidebar-label">Incoming requests</p>
+          <div class="thread-list compact" id="requestList" aria-label="Incoming requests" data-request-list>
             <div class="empty-state">
-              <strong>No requests yet</strong>
+              <strong>No incoming requests</strong>
               <span>Incoming connection requests will appear here.</span>
+            </div>
+          </div>
+
+          <p class="sidebar-label">Sent requests</p>
+          <div class="thread-list compact" aria-label="Outgoing requests" data-sent-request-list>
+            <div class="empty-state">
+              <strong>No sent requests</strong>
+              <span>Requests you send will appear here.</span>
             </div>
           </div>
         </div>
 
+        <p class="sidebar-label">Chats</p>
+        <div class="thread-list" id="chatList" aria-label="Chat list" data-conversation-list>
+          <div class="empty-state">
+            <strong>No conversations yet</strong>
+            <span>Select a contact to start chatting.</span>
+          </div>
+        </div>
+
         <p class="sidebar-label">Contacts</p>
-        <div class="thread-list compact" aria-label="Contact list" data-contact-list>
+        <div class="thread-list" aria-label="Contact list" data-contact-list>
           <div class="empty-state">
             <strong>Loading contacts</strong>
             <span>Loading your secure connections...</span>
           </div>
         </div>
-
-        <p class="sidebar-label">Conversations</p>
-        <div class="thread-list" aria-label="Conversation list" data-conversation-list>
-          <div class="empty-state">
-            <strong>Loading chats</strong>
-            <span>Listening for recent conversations...</span>
-          </div>
-        </div>
       </aside>
 
-      <div class="sidebar-backdrop" data-sidebar-backdrop hidden></div>
-
-      <section class="main-panel">
-        <header class="chat-header">
-          <div class="user-meta">
-            <button class="icon-button mobile-sidebar-toggle" type="button" data-sidebar-toggle aria-label="Open sidebar">
-              <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <!-- Main Chat Area -->
+      <main class="chat-main">
+        <div class="chat-container" data-chat-container>
+          <!-- Chat Header -->
+          <header class="chat-header">
+            <button class="mobile-sidebar-toggle" data-sidebar-toggle-mobile aria-label="Open sidebar">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
             </button>
-            <div class="avatar purple" data-chat-avatar>OR</div>
-            <div>
-              <h1 data-chat-title>Select a conversation</h1>
-              <p data-chat-subtitle>Search users or open a recent chat</p>
-              <p id="user-status" class="chat-status">Status unavailable</p>
-              <p id="typing-indicator" class="chat-typing" hidden></p>
+            <div class="chat-peer">
+              <div class="avatar" data-chat-avatar>OR</div>
+              <div class="peer-info">
+                <h3 data-chat-title>Select a conversation</h3>
+                <span data-chat-subtitle>Search users or open a recent chat</span>
+              </div>
+            </div>
+            <div class="chat-actions">
+              <button class="icon-button" data-remove-contact hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <!-- Messages Area -->
+          <div class="chat-messages messages" id="messages" data-chat-stream>
+            <div class="chat-empty">
+              <strong>Your chats will appear here</strong>
+              <span>Select a user from the sidebar to start a one-to-one conversation.</span>
             </div>
           </div>
-          <div class="header-actions">
-            <span class="status-pill"><span class="status-dot"></span> Encrypted</span>
-            <button class="icon-button" type="button" data-remove-contact title="Remove contact">🗑</button>
-            <button class="icon-button" type="button" data-block-contact title="Block contact">🚫</button>
-            <button class="icon-button" type="button" data-theme-toggle aria-label="Toggle theme">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 3v2.2M12 18.8V21M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M3 12h2.2M18.8 12H21M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-              </svg>
-            </button>
-            <a class="icon-button" href="settings.html" aria-label="Open settings">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.8" />
-                <path d="M19.5 12.7c.04-.23.06-.46.06-.7s-.02-.47-.06-.7l2.06-1.62-1.95-3.38-2.43.98a7.5 7.5 0 0 0-1.2-.7L15.6 4h-3.9l-.38 2.58c-.42.18-.82.42-1.2.7L7.7 6.3 5.75 9.68l2.06 1.62a4.8 4.8 0 0 0 0 1.4l-2.06 1.62 1.95 3.38 2.43-.98c.38.28.78.52 1.2.7L11.7 20h3.9l.38-2.58c.42-.18.82-.42 1.2-.7l2.43.98 1.95-3.38-2.06-1.62Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
-              </svg>
-            </a>
-            <button class="icon-button" type="button" data-logout aria-label="Log out">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M10 17 15 12l-5-5M15 12H3M21 5v14a2 2 0 0 1-2 2h-5M14 3h5a2 2 0 0 1 2 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
+
+          <!-- Typing Indicator -->
+          <div class="typing-indicator" data-typing-indicator hidden>
+            <span>Typing...</span>
           </div>
-        </header>
 
-        <div class="auth-banner" data-verification-banner hidden>
-          <span>Your email is not verified yet. Verify it to keep your Orbi account trusted.</span>
-          <button class="button secondary" type="button" data-resend-verification>Resend email</button>
-        </div>
-        <div class="auth-message" data-page-message hidden></div>
-
-        <div class="chat-stream" data-chat-stream>
-          <div class="chat-empty">
-            <strong>Your chats will appear here</strong>
-            <span>Select a user from the sidebar to start a one-to-one conversation.</span>
+          <!-- Message Input -->
+          <div class="chat-input">
+            <form class="message-form" data-composer>
+              <div class="input-actions">
+                <button id="attachBtn" type="button" class="icon-button" data-attach-button title="Attach file">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M21.4 11.6-8.8 8.8a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.4 9.4a2 2 0 1 1-2.8-2.8l8.8-8.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <input id="fileInput" type="file" accept="image/*" data-image-input hidden />
+              </div>
+              <input id="messageInput" type="text" placeholder="Type a message..." data-message-input disabled />
+              <div class="input-actions">
+                <button type="button" class="icon-button" data-voice-button title="Voice message">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 19v4M8 23h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <button id="sendBtn" type="submit" class="send-button" data-send-message disabled>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
+      </main>
+    </div>
 
-        <form class="composer" data-composer data-realtime-composer>
-          <button class="icon-button" type="button" aria-label="Attach file">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="m21.4 11.6-8.8 8.8a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.4 9.4a2 2 0 1 1-2.8-2.8l8.8-8.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <textarea data-message-input placeholder="Write a message..." aria-label="Message" disabled></textarea>
-          <button class="button primary" type="submit" data-send-message disabled>Send</button>
-        </form>
-      </section>
-    </main>
+    <!-- Backdrop for mobile -->
+    <div class="sidebar-backdrop" data-sidebar-backdrop hidden></div>
 
-    <script src="assets/js/app.js"></script>
-    <script type="module" src="assets/js/auth.js"></script>
+    <!-- Image Preview Modal -->
+    <div class="modal" data-image-modal hidden>
+      <div class="modal-backdrop" data-modal-backdrop></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Send Image</h3>
+          <button class="modal-close" data-modal-close>&times;</button>
+        </div>
+        <div class="modal-body">
+          <img data-preview-image alt="Preview" />
+          <div class="modal-actions">
+            <button class="button secondary" data-cancel-image>Cancel</button>
+            <button class="button primary" data-send-image>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Image Fullscreen Modal -->
+    <div class="modal fullscreen" data-fullscreen-modal hidden>
+      <div class="modal-backdrop" data-fullscreen-backdrop></div>
+      <div class="modal-content">
+        <button class="modal-close fullscreen-close" data-fullscreen-close>&times;</button>
+        <img data-fullscreen-image alt="Image" />
+      </div>
+    </div>
+
+    <!-- Voice Recording Modal -->
+    <div class="modal" data-voice-modal hidden>
+      <div class="modal-backdrop" data-voice-backdrop></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Voice Message</h3>
+          <button class="modal-close" data-voice-close>&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="recording-indicator" data-recording-indicator>
+            <div class="recording-pulse"></div>
+            <span data-recording-timer>00:00</span>
+          </div>
+          <audio controls data-preview-audio hidden></audio>
+          <div class="modal-actions">
+            <button class="button secondary" data-cancel-voice>Cancel</button>
+            <button class="button primary" data-send-voice disabled>Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" data-toast-container></div>
+
     <script type="module" src="assets/js/chat.js"></script>
   </body>
 </html>
