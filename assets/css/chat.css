@@ -4,6 +4,12 @@ body[data-page="chat"] {
   color: var(--text);
 }
 
+/* Hide close button if exists */
+.close-btn,
+#closeSidebar {
+  display: none !important;
+}
+
 .app-container {
   display: flex;
   min-height: 100vh;
@@ -428,8 +434,9 @@ body[data-page="chat"] {
 .messages {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px;
+  padding: 12px;
+  width: 100%;
+  gap: 6px;
 }
 
 .chat-empty {
@@ -453,7 +460,6 @@ body[data-page="chat"] {
   display: flex;
   width: 100%;
   gap: 6px;
-  max-width: min(75%, 720px);
   margin-bottom: 12px;
   animation: messageSlideIn 260ms ease-out;
 }
@@ -469,23 +475,55 @@ body[data-page="chat"] {
 }
 
 .bubble {
-  max-width: 60%;
-  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 75%;
+  padding: 10px 12px;
   border-radius: 16px;
   word-wrap: break-word;
   background: var(--panel);
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
+/* message text */
+.text {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+/* meta (time + ticks) */
+.meta {
+  align-self: flex-end;   /* 👉 push to right */
+  font-size: 11px;
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
+/* ticks style */
+.ticks {
+  font-size: 12px;
+}
+
+/* sent bubble */
 .message.sent .bubble {
   background: #0A84FF;
   color: white;
 }
 
+/* received bubble */
 .message.received .bubble {
   background: #111827;
   color: #f9fafb;
+}
+
+/* WhatsApp-style blue ticks */
+.message.sent .ticks.seen {
+  color: #4fc3f7;
 }
 
 .message.sent .message-content,
@@ -1269,6 +1307,19 @@ body.dark-mode .chat-header {
   line-height: 1 !important;
 }
 
+.chat-header .typing-indicator {
+  font-size: 12px !important;
+  color: #007aff !important;
+  font-style: italic !important;
+  line-height: 1 !important;
+}
+
+.chat-header .user-status {
+  font-size: 12px !important;
+  color: #8e8e93 !important;
+  line-height: 1 !important;
+}
+
 /* Actions */
 .header-actions {
   display: flex !important;
@@ -1301,6 +1352,14 @@ body.dark-mode .chat-header .name {
 }
 
 body.dark-mode .chat-header .status {
+  color: #9ca3af !important;
+}
+
+body.dark-mode .chat-header .typing-indicator {
+  color: #60a5fa !important;
+}
+
+body.dark-mode .chat-header .user-status {
   color: #9ca3af !important;
 }
 
@@ -1405,5 +1464,16 @@ body.dark-mode .header-actions .logout-btn {
   /* Input */
   .message-form input {
     font-size: 14px !important;
+  }
+}
+
+/* Mobile optimization */
+@media (max-width: 768px) {
+  .bubble {
+    max-width: 85%;
+  }
+
+  .messages {
+    padding: 8px;
   }
 }

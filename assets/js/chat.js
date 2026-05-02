@@ -96,8 +96,8 @@ const els = {
   chatTitle: $("[data-chat-title]"),
   chatSubtitle: $("[data-chat-subtitle]"),
   chatAvatar: $("[data-chat-avatar]"),
-  userStatus: $("[data-user-status]"),
-  typingIndicator: $("[data-typing-indicator]"),
+  userStatus: $("#userStatus"),
+  typingIndicator: $("#typingIndicator"),
   chatStream: $("#messages"),
   composer: $("[data-composer]"),
   messageInput: $("#messageInput"),
@@ -811,12 +811,12 @@ const handleTyping = () => {
 
   if (!state.isTyping) {
     state.isTyping = true;
-    setTypingState(state.activeChatId, true).catch(() => {});
+    startTyping(state.activeChatId).catch(() => {});
   }
 
   state.typingTimer = window.setTimeout(() => {
     state.isTyping = false;
-    setTypingState(state.activeChatId, false).catch(() => {});
+    stopTyping(state.activeChatId).catch(() => {});
   }, 2000);
 };
 
@@ -1218,9 +1218,32 @@ const markMessagesRead = async (messages) => {
   await Promise.all(updates);
 };
 
-function getTickStatus(msg) {
-  if (msg.readBy?.length > 1) return "✔✔ read";
-  if (msg.deliveredTo?.length > 1) return "✔✔";
+const startTyping = async (chatId) => {
+  if (!chatId || !state.currentUser) return;
+  await setDoc(doc(db, "typing", chatId), {
+    [state.currentUser.uid]: true
+  }, { merge: true });
+};
+
+const stopTyping = async (chatId) => {
+  if (!chatId || !state.currentUser) return;
+  await updateDoc(doc(db, "typing", chatId), {
+    [state.currentUser.uid]: deleteField()
+  });
+};
+
+const listenPresence = (uid, callback) => {
+  if (!uid) return;
+  const userRef = doc(db, "users", uid);
+  return onSnapshot(userRef, (snap) => {
+    const data = snap.data();
+    callback(data?.status || "offline", data?.lastSeen);
+  });
+};
+
+function getTicks(msg, otherUid) {
+  if (msg.readBy?.includes(otherUid)) return "✔✔";
+  if (msg.deliveredTo?.includes(otherUid)) return "✔✔";
   return "✔";
 }
 
@@ -1252,12 +1275,16 @@ const renderMessages = (messages) => {
     console.log("MSG sender:", message.senderId);
     console.log("ME:", currentUid);
 
-    const tickStatus = getTickStatus(message);
-    const tickHtml = isMe ? `<span class="tick ${tickStatus.includes('read') ? 'read' : ''}">${tickStatus.replace(' read', '')}</span>` : "";
+    const tickStatus = getTicks(message, state.activePeer?.uid);
+    const ticksClass = message.readBy?.includes(state.activePeer?.uid) ? "ticks seen" : "ticks";
 
     let content = "";
     if (message.type === "image") {
-      content = `<img src="${escapeHTML(message.imageUrl)}" alt="Image" class="message-image" onclick="openFullscreen('${escapeHTML(message.imageUrl)}')" />`;
+      content = `<img src="${escapeHTML(message.imageUrl)}" alt="Image" class="message-image" onclick="openFullscreen('${escapeHTML(message.imageUrl)}')" />
+        <div class="meta">
+          <span class="time">${formatTime(message.createdAt)}</span>
+          ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
+        </div>`;
     } else if (message.type === "audio") {
       content = `
         <div class="message-audio">
@@ -1268,18 +1295,25 @@ const renderMessages = (messages) => {
           </button>
           <span class="audio-duration">${message.duration || "0:00"}</span>
         </div>
+        <div class="meta">
+          <span class="time">${formatTime(message.createdAt)}</span>
+          ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
+        </div>
       `;
     } else {
-      content = escapeHTML(message.text);
+      content = `
+        <span class="text">${escapeHTML(message.text)}</span>
+        <div class="meta">
+          <span class="time">${formatTime(message.createdAt)}</span>
+          ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
+        </div>
+      `;
     }
 
     return `
       <div class="message ${isMe ? "sent" : "received"}">
         <div class="bubble">
           ${content}
-        </div>
-        <div class="meta">
-          ${formatTime(message.createdAt)} ${tickHtml}
         </div>
       </div>
     `;
@@ -1359,9 +1393,9 @@ const openConversation = async (peer, chatId = "") => {
   setChatHeader(peer);
   renderConversations();
   listenMessages(state.activeChatId);
-  listenUserStatus(peer.uid, (peerStatus) => {
+  listenPresence(peer.uid, (status, lastSeen) => {
     if (!state.activePeer || state.activePeer.uid !== peer.uid) return;
-    state.activePeer = { ...state.activePeer, ...peerStatus };
+    state.activePeer = { ...state.activePeer, status, lastSeen };
     setChatHeader(state.activePeer);
   });
   listenTyping(state.activeChatId, (isTyping) => {
@@ -1472,7 +1506,7 @@ const bindEvents = () => {
     if (!state.activeChatId || !state.currentUser) return;
     if (state.typingTimer) clearTimeout(state.typingTimer);
     state.isTyping = false;
-    setTypingState(state.activeChatId, false).catch(() => {});
+    stopTyping(state.activeChatId).catch(() => {});
   });
 
   els.inviteButton?.addEventListener("click", async () => {
@@ -1786,6 +1820,10 @@ const initChat = async (user) => {
   await processInviteLink();
   await updateOwnPresence("online");
   console.log("[Init] Presence set to online");
+
+  // Presence listeners
+  window.addEventListener("focus", () => updateOwnPresence("online"));
+  window.addEventListener("blur", () => updateOwnPresence("away"));
 
   // Setup notifications
   if ("Notification" in window) {
