@@ -19,7 +19,20 @@
             <div class="avatar" data-user-avatar>OR</div>
             <div class="user-info">
               <h3 id="userName" data-user-name>Loading...</h3>
+              <div class="user-hidden-meta" style="display:none;">
+                <span id="username"></span>
+                <span id="userEmail"></span>
+              </div>
               <span data-user-status></span>
+            </div>
+            <div class="header-actions">
+              <label class="toggle">
+                <input type="checkbox" id="incognitoToggle">
+                <span class="slider"></span>
+              </label>
+              <span class="toggle-label">Incognito</span>
+
+              <button class="close-btn" type="button" aria-label="Close incognito toggle">✕</button>
             </div>
           </div>
           <button class="icon-button" data-sidebar-toggle aria-label="Toggle sidebar">
@@ -76,7 +89,7 @@
         </div>
 
         <p class="sidebar-label">Contacts</p>
-        <div class="thread-list" aria-label="Contact list" data-contact-list>
+        <div class="thread-list" id="contactList" aria-label="Contact list" data-contact-list>
           <div class="empty-state">
             <strong>Loading contacts</strong>
             <span>Loading your secure connections...</span>
@@ -124,11 +137,18 @@
 
           <!-- Message Input -->
           <div class="chat-input">
+            <div id="replyBox" class="reply-box"></div>
             <form class="message-form" data-composer>
               <div class="input-actions">
                 <button id="attachBtn" type="button" class="icon-button" data-attach-button title="Attach file">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                     <path d="M21.4 11.6-8.8 8.8a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.4 9.4a2 2 0 1 1-2.8-2.8l8.8-8.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <button id="voiceBtn" type="button" class="icon-button" data-voice-button title="Voice message">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                    <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 19v4M8 23h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
                 </button>
                 <input id="fileInput" type="file" accept="image/*" data-image-input hidden />
@@ -148,6 +168,7 @@
                 </button>
               </div>
             </form>
+            <div id="smartReplyBox" class="smart-reply-box"></div>
           </div>
         </div>
       </main>
@@ -208,6 +229,7 @@
     <!-- Toast Notifications -->
     <div class="toast-container" data-toast-container></div>
 
+    <script type="module" src="./init.js"></script>
     <script type="module" src="assets/js/chat.js"></script>
   </body>
 </html>

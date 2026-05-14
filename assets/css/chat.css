@@ -1324,7 +1324,76 @@ body.dark-mode .chat-header {
 .header-actions {
   display: flex !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 12px !important;
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #2a2f3a;
+  border-radius: 20px;
+  transition: 0.2s;
+}
+
+.slider::before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.toggle input:checked + .slider {
+  background: #3b82f6;
+}
+
+.toggle input:checked + .slider::before {
+  transform: translateX(16px);
+}
+
+.close-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(255,255,255,0.06);
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.close-btn:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.toggle input:checked ~ .toggle-label {
+  color: #3b82f6;
+  opacity: 1;
 }
 
 /* Icon buttons */
@@ -1476,4 +1545,111 @@ body.dark-mode .header-actions .logout-btn {
   .messages {
     padding: 8px;
   }
+}
+
+/* New features */
+.reactions {
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.reply-preview {
+  font-size: 12px;
+  opacity: 0.7;
+  border-left: 3px solid #0A84FF;
+  padding-left: 6px;
+  margin-bottom: 4px;
+}
+
+.message {
+  position: relative;
+}
+
+.reaction-strip {
+  position: absolute;
+  top: -42px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  background: #1f2937;
+  border-radius: 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 5;
+}
+
+.message.show-reactions .reaction-strip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) scale(1);
+}
+
+.reaction-btn {
+  font-size: 16px;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: transform 0.1s ease;
+}
+
+.reaction-btn:hover {
+  transform: scale(1.2);
+}
+
+.reaction-row {
+  display: inline-flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reaction-badge {
+  background: #111827;
+  color: white;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.smart-reply-box {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  flex-wrap: wrap;
+}
+
+.smart-reply-box button {
+  background: #0A84FF;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.smart-reply-box button:hover {
+  background: #0056cc;
+}
+
+.reply-box {
+  background: rgba(0,0,0,0.05);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.incognito-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 8px;
 }

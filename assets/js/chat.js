@@ -79,7 +79,7 @@ const els = {
   sidebar: $("[data-sidebar]"),
   sidebarBackdrop: $("[data-sidebar-backdrop]"),
   sidebarToggleButtons: $$('[data-sidebar-toggle]'),
-  contactList: $("[data-contact-list]"),
+  contactList: document.getElementById("contactList"),
   conversationList: $("#chatList"),
   userSearch: $("#chatSearchInput"),
   inviteButton: $("[data-invite-button]"),
@@ -106,6 +106,10 @@ const els = {
   userName: $("#userName"),
   userAvatar: $("[data-user-avatar]"),
   themeToggle: $("#themeToggle"),
+  incognitoToggle: $("#incognitoToggle"),
+  replyBox: $("#replyBox"),
+  smartReplyBox: $("#smartReplyBox"),
+  voiceBtn: $("#voiceBtn"),
   // New media elements
   attachBtn: $("#attachBtn"),
   attachButton: $("[data-attach-button]"),
@@ -804,7 +808,7 @@ const resetPeerListeners = () => {
 };
 
 const handleTyping = () => {
-  if (!state.activeChatId || !state.currentUser) return;
+  if (!state.activeChatId || !state.currentUser || state.currentProfile?.incognito) return;
   if (state.typingTimer) {
     clearTimeout(state.typingTimer);
   }
@@ -1197,7 +1201,7 @@ window.playAudio = (button, url) => {
 };
 
 const markMessagesDelivered = async (messages) => {
-  if (!state.activeChatId || !state.currentUser) return;
+  if (!state.activeChatId || !state.currentUser || state.currentProfile?.incognito) return;
   const updates = messages
     .filter((message) => message.senderId !== state.currentUser.uid && !message.deliveredTo?.includes(state.currentUser.uid))
     .map((message) => updateDoc(doc(db, "chats", state.activeChatId, "messages", message.id), {
@@ -1258,6 +1262,9 @@ const renderMessages = (messages) => {
     return;
   }
 
+  const messagesMap = {};
+  messages.forEach(msg => messagesMap[msg.id] = msg);
+
   els.chatStream.innerHTML = messages.map((message) => {
     const currentUid = state.currentUser.uid;
     const currentEmail = state.currentUser.email;
@@ -1280,45 +1287,64 @@ const renderMessages = (messages) => {
 
     let content = "";
     if (message.type === "image") {
-      content = `<img src="${escapeHTML(message.imageUrl)}" alt="Image" class="message-image" onclick="openFullscreen('${escapeHTML(message.imageUrl)}')" />
+      content = `${renderReply(message, messagesMap)}<img src="${escapeHTML(message.imageUrl)}" alt="Image" class="message-image" onclick="openFullscreen('${escapeHTML(message.imageUrl)}')" />
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>`;
+        </div>${renderReactions(message)}`;
     } else if (message.type === "audio") {
-      content = `
-        <div class="message-audio">
-          <button class="audio-play" onclick="playAudio(this, '${escapeHTML(message.audioUrl)}')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
-          </button>
-          <span class="audio-duration">${message.duration || "0:00"}</span>
-        </div>
+      content = `${renderReply(message, messagesMap)}<audio controls src="${escapeHTML(message.audioUrl)}"></audio>
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>
-      `;
+        </div>${renderReactions(message)}`;
     } else {
-      content = `
-        <span class="text">${escapeHTML(message.text)}</span>
+      content = `${renderReply(message, messagesMap)}<span class="text">${escapeHTML(message.text)}</span>
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>
-      `;
+        </div>${renderReactions(message)}`;
     }
 
     return `
       <div class="message ${isMe ? "sent" : "received"}">
         <div class="bubble">
           ${content}
+          ${renderReactions(message)}
         </div>
+        ${createReactionBar(message.id)}
       </div>
     `;
   }).join("");
   els.chatStream.scrollTop = els.chatStream.scrollHeight;
+
+  els.chatStream.querySelectorAll(".message").forEach((messageEl) => {
+    let timer;
+    messageEl.addEventListener("touchstart", () => {
+      timer = window.setTimeout(() => {
+        messageEl.classList.add("show-reactions");
+      }, 300);
+    });
+    messageEl.addEventListener("touchend", () => clearTimeout(timer));
+    messageEl.addEventListener("touchmove", () => clearTimeout(timer));
+    messageEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      messageEl.classList.toggle("show-reactions");
+    });
+  });
+
+  // Smart replies for last received message
+  const lastReceived = [...messages].reverse().find(m => m.senderId !== state.currentUser.uid);
+  if (lastReceived && lastReceived.type === "text") {
+    const replies = getSmartReplies(lastReceived.text);
+    if (replies.length && els.smartReplyBox) {
+      els.smartReplyBox.innerHTML = replies.map(r => `<button onclick="sendQuick('${r}')">${r}</button>`).join("");
+    } else if (els.smartReplyBox) {
+      els.smartReplyBox.innerHTML = "";
+    }
+  } else if (els.smartReplyBox) {
+    els.smartReplyBox.innerHTML = "";
+  }
 };
 
 const markChatRead = async (chatId) => {
@@ -1432,7 +1458,8 @@ const sendMessage = async (event) => {
       iv: encrypted.iv,
       createdAt: serverTimestamp(),
       deliveredTo: [state.currentUser.uid],
-      readBy: [state.currentUser.uid]
+      readBy: [state.currentUser.uid],
+      replyTo: replyingTo?.id || null
     });
 
     const chatRef = doc(db, "chats", state.activeChatId);
@@ -1447,6 +1474,8 @@ const sendMessage = async (event) => {
     await updateDoc(chatRef, new FieldPath("unreadCounts", state.activePeer.uid), increment(1));
 
     els.messageInput.value = "";
+    replyingTo = null;
+    if (els.replyBox) els.replyBox.innerText = "";
   } catch (error) {
     showMessage(`Message not sent: ${error.message}`, "error");
   } finally {
@@ -1455,6 +1484,79 @@ const sendMessage = async (event) => {
   }
 };
 
+// 🔥 REACTIONS SYSTEM
+const reactions = ["👍","❤️","😂","😮","😢","🔥"];
+
+function createReactionBar(messageId) {
+  return `
+    <div class="reaction-strip">
+      ${reactions.map((emoji) => `
+        <div class="reaction-btn" onclick="addReaction('${state.activeChatId}', '${messageId}', '${emoji}')">${emoji}</div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function addReaction(chatId, messageId, emoji) {
+  const msgRef = doc(db, "chats", chatId, "messages", messageId);
+  const uid = auth.currentUser?.uid || window.currentUser?.uid;
+  if (!uid) return;
+
+  await updateDoc(msgRef, {
+    [`reactions.${emoji}`]: arrayUnion(uid)
+  });
+}
+
+function renderReactions(msg) {
+  const row = document.createElement("div");
+  row.className = "reaction-row";
+
+  if (!msg.reactions) return row.outerHTML;
+
+  Object.entries(msg.reactions).forEach(([emoji, users]) => {
+    const count = Array.isArray(users) ? users.length : 0;
+    if (count === 0) return;
+    row.innerHTML += `<div class="reaction-badge">${emoji} ${count}</div>`;
+  });
+
+  return row.outerHTML;
+}
+
+// 🧠 SMART REPLIES
+function getSmartReplies(text) {
+  const t = text.toLowerCase();
+  if (t.includes("hello")) return ["Hi!", "Hey 👋"];
+  if (t.includes("thanks")) return ["Welcome!", "No problem 👍"];
+  if (t.includes("ok")) return ["👍", "Got it"];
+  return [];
+}
+
+// 🎭 INCOGNITO MODE
+async function toggleIncognito(value) {
+  await updateDoc(doc(db, "users", window.currentUser.uid), {
+    incognito: value
+  });
+}
+
+// 🧵 REPLY SYSTEM
+let replyingTo = null;
+
+function setReply(msg) {
+  replyingTo = msg;
+  if (els.replyBox) els.replyBox.innerText = "Replying to: " + msg.text;
+}
+
+function renderReply(msg, messagesMap) {
+  if (!msg.replyTo) return "";
+  const original = messagesMap[msg.replyTo];
+  if (!original) return "";
+  return `<div class="reply-preview">${original.text}</div>`;
+}
+
+function sendQuick(text) {
+  els.messageInput.value = text;
+  sendMessage({ preventDefault: () => {} });
+}
 
 const listenContacts = () => {
   const contactsRef = collection(db, "contacts", state.currentUser.uid, "list");
@@ -1503,11 +1605,14 @@ const bindEvents = () => {
   });
 
   els.messageInput?.addEventListener("blur", () => {
-    if (!state.activeChatId || !state.currentUser) return;
+    if (!state.activeChatId || !state.currentUser || state.currentProfile?.incognito) return;
     if (state.typingTimer) clearTimeout(state.typingTimer);
     state.isTyping = false;
     stopTyping(state.activeChatId).catch(() => {});
   });
+
+  els.voiceBtn?.addEventListener("mousedown", startRecording);
+  els.voiceBtn?.addEventListener("mouseup", stopRecording);
 
   els.inviteButton?.addEventListener("click", async () => {
     try {
@@ -1534,6 +1639,14 @@ const bindEvents = () => {
         document.body.classList.contains("dark-mode") ? "dark" : "light"
       );
     };
+  }
+
+  if (els.incognitoToggle) {
+    els.incognitoToggle.addEventListener("change", (e) => {
+      const isOn = e.target.checked;
+      console.log("Incognito:", isOn);
+      toggleIncognito(isOn).catch((error) => console.error("Incognito update failed:", error));
+    });
   }
 
   const sidebarEl = document.querySelector(".sidebar");
@@ -1807,6 +1920,9 @@ const initChat = async (user) => {
   console.log("[Init] User profile loaded:", state.currentProfile);
   
   updateUserProfileUI();
+  if (els.incognitoToggle) {
+    els.incognitoToggle.checked = state.currentProfile?.incognito || false;
+  }
   setChatHeader(null);
   renderEmpty(els.contactList, "Loading contacts", "Loading your secure connections...");
   renderEmpty(els.conversationList, "Loading chats", "Listening for recent conversations...");
@@ -1908,31 +2024,92 @@ document.addEventListener("DOMContentLoaded", () => {
   
   bindEvents();
 
-  onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      console.log("[Auth] No user found, redirecting to login");
-      window.location.href = "login.html";
-      return;
-    }
+  const chatList = document.getElementById("chatList");
+  const contactList = document.getElementById("contactList");
+  const messagesEl = document.getElementById("messages");
+  const usernameEl = document.getElementById("username");
+  const userEmailEl = document.getElementById("userEmail");
+  console.log(chatList, contactList, messagesEl, usernameEl, userEmailEl);
 
-    console.log("[Auth] User logged in:", user.uid);
-
+  // ✅ STEP 1: CENTRALIZE AUTH - Load functions
+  const loadUserProfile = async (user) => {
     try {
-      const userDoc = await getDoc(doc(db, "users", user.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        const nameEl = document.getElementById("userName");
-        if (nameEl) {
-          nameEl.innerText = data.name || user.email || "Orbi User";
-        }
+      state.currentProfile = await profileFromUser(user);
+      updateUserProfileUI();
+      if (els.incognitoToggle) {
+        els.incognitoToggle.checked = state.currentProfile?.incognito || false;
       }
     } catch (error) {
       console.error("[Auth] Failed to load user profile:", error);
     }
+  };
 
-    initChat(user).catch((error) => {
-      console.error("[Chat] Failed to start:", error);
-      showMessage(`Chat failed to start: ${error.message}`, "error");
-    });
+  const loadChats = async (uid) => {
+    try {
+      const q = query(collection(db, "chats"), where("participantIds", "array-contains", uid));
+      state.unsubChats = onSnapshot(q, (snapshot) => {
+        state.chats.clear();
+        snapshot.forEach((doc) => {
+          state.chats.set(doc.id, { id: doc.id, ...doc.data() });
+        });
+        renderConversations();
+      });
+    } catch (error) {
+      console.error("[Chat] Failed to load chats:", error);
+    }
+  };
+
+  const loadContacts = async (uid) => {
+    try {
+      const q = query(collection(db, "users"), where("uid", "!=", uid));
+      state.unsubContacts = onSnapshot(q, (snapshot) => {
+        state.contacts = [];
+        snapshot.forEach((doc) => {
+          state.contacts.push({ id: doc.id, ...doc.data() });
+        });
+        renderContacts();
+      });
+    } catch (error) {
+      console.error("[Contacts] Failed to load contacts:", error);
+    }
+  };
+
+  const setupPresence = async (uid) => {
+    try {
+      const userStatusRef = doc(db, "status", uid);
+      await setDoc(userStatusRef, {
+        online: true,
+        lastSeen: serverTimestamp(),
+      }, { merge: true });
+
+      // Set offline on unload
+      window.addEventListener("beforeunload", async () => {
+        await setDoc(userStatusRef, {
+          online: false,
+          lastSeen: serverTimestamp(),
+        }, { merge: true });
+      });
+    } catch (error) {
+      console.error("[Presence] Failed to setup presence:", error);
+    }
+  };
+
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+      window.location.href = "login.html";
+      return;
+    }
+
+    console.log("✅ User loaded:", user.uid);
+
+    // ✅ ALWAYS use this user
+    window.currentUser = user;
+    state.currentUser = user;
+
+    // Load everything AFTER auth
+    await loadUserProfile(user);
+    await loadChats(user.uid);
+    await loadContacts(user.uid);
+    await setupPresence(user.uid);
   });
 });
