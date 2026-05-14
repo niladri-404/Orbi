@@ -13,12 +13,12 @@ console.log("Chat JS loaded successfully");
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import {
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
   deleteDoc,
   deleteField,
   doc,
-  FieldPath,
   getDoc,
   getDocs,
   increment,
@@ -48,11 +48,17 @@ const state = {
   currentProfile: null,
   contacts: [],
   chats: new Map(),
+  messages: new Map(),
   activeChatId: "",
   activePeer: null,
   roomKeys: new Map(),
   typingTimer: null,
   typingDebounce: null,
+  reactionTouchTarget: null,
+  reactionPressTimer: null,
+  reactionPressOpened: false,
+  reactionPending: new Set(),
+  activeTheme: "neon-blue",
   isTyping: false,
   peerTyping: false,
   presenceListenersAttached: false,
@@ -62,8 +68,11 @@ const state = {
   unsubMessages: null,
   unsubContacts: null,
   unsubIncoming: null,
+  unsubOutgoing: null,
   unsubPeerStatus: null,
   unsubPeerTyping: null,
+  eventsBound: false,
+  initializedUid: "",
   // Media recording state
   mediaRecorder: null,
   recordedChunks: [],
@@ -106,6 +115,9 @@ const els = {
   userName: $("#userName"),
   userAvatar: $("[data-user-avatar]"),
   themeToggle: $("#themeToggle"),
+  settingsButton: $("#settingsBtn"),
+  themeModal: $("[data-theme-modal]"),
+  themeGrid: $("[data-theme-grid]"),
   incognitoToggle: $("#incognitoToggle"),
   replyBox: $("#replyBox"),
   smartReplyBox: $("#smartReplyBox"),
@@ -164,6 +176,78 @@ const hideMessage = () => {
   if (!els.pageMessage) return;
   els.pageMessage.textContent = "";
   els.pageMessage.hidden = true;
+};
+
+const DEFAULT_CHAT_THEME = "neon-blue";
+const CHAT_THEMES = new Set([
+  "amoled-black",
+  "cyberpunk",
+  "ios-glass",
+  "neon-blue",
+  "sunset-gradient",
+  "midnight-purple"
+]);
+
+const normalizeTheme = (theme) => CHAT_THEMES.has(theme) ? theme : DEFAULT_CHAT_THEME;
+
+const updateThemePickerState = () => {
+  if (!els.themeGrid) return;
+  els.themeGrid.querySelectorAll("[data-theme-option]").forEach((button) => {
+    const isActive = button.dataset.themeOption === state.activeTheme;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+};
+
+const applyTheme = (theme) => {
+  const nextTheme = normalizeTheme(theme);
+  state.activeTheme = nextTheme;
+  document.body.setAttribute("data-theme", nextTheme);
+  updateThemePickerState();
+};
+
+const openThemeModal = () => {
+  if (!state.activeChatId) {
+    showMessage("Open a conversation before choosing a chat theme.", "warning");
+    return;
+  }
+  if (!els.themeModal) return;
+  updateThemePickerState();
+  els.themeModal.hidden = false;
+  requestAnimationFrame(() => els.themeModal?.classList.add("open"));
+};
+
+const closeThemeModal = () => {
+  if (!els.themeModal) return;
+  els.themeModal.classList.remove("open");
+  window.setTimeout(() => {
+    if (!els.themeModal?.classList.contains("open")) {
+      els.themeModal.hidden = true;
+    }
+  }, 180);
+};
+
+const saveChatTheme = async (theme) => {
+  const nextTheme = normalizeTheme(theme);
+  if (!state.activeChatId || !state.currentUser) return;
+
+  applyTheme(nextTheme);
+  const activeChat = state.chats.get(state.activeChatId);
+  if (activeChat) {
+    state.chats.set(state.activeChatId, { ...activeChat, theme: nextTheme });
+  }
+
+  try {
+    await updateDoc(doc(db, "chats", state.activeChatId), {
+      theme: nextTheme,
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error("[Theme] Failed to save chat theme:", error);
+    showMessage("Theme could not be saved. Check Firestore permissions.", "error");
+    const fallbackTheme = normalizeTheme(activeChat?.theme);
+    applyTheme(fallbackTheme);
+  }
 };
 
 const openSidebar = () => {
@@ -625,6 +709,7 @@ window.sendRequest = async (targetUid, targetEmail) => {
 const listenIncomingRequests = () => {
   if (!state.currentUser) return;
 
+  unsubscribe("unsubIncoming");
   const requestsRef = incomingRequestsRef(state.currentUser.uid);
   state.unsubIncoming = onSnapshot(requestsRef, (snapshot) => {
     state.incomingRequests = snapshot.docs.map((docSnapshot) => ({
@@ -641,6 +726,7 @@ const listenIncomingRequests = () => {
 const listenOutgoingRequests = () => {
   if (!state.currentUser) return;
 
+  unsubscribe("unsubOutgoing");
   const requestsRef = outgoingRequestsRef(state.currentUser.uid);
   state.unsubOutgoing = onSnapshot(requestsRef, (snapshot) => {
     state.outgoingRequests = snapshot.docs.map((docSnapshot) => ({
@@ -844,39 +930,56 @@ const peerFromChat = (chat) => {
   return chat.participants?.[peerId] || state.contacts.find((contact) => contact.uid === peerId) || null;
 };
 
+const unsubscribe = (key) => {
+  if (typeof state[key] === "function") {
+    state[key]();
+    state[key] = null;
+  }
+};
+
+const resetRealtimeListeners = () => {
+  unsubscribe("unsubChats");
+  unsubscribe("unsubMessages");
+  unsubscribe("unsubContacts");
+  unsubscribe("unsubIncoming");
+  unsubscribe("unsubOutgoing");
+  resetPeerListeners();
+  state.messages.clear();
+  state.reactionPending.clear();
+};
+
 const profileFromUser = async (user) => {
-  const snap = await getDoc(doc(db, "users", user.uid));
-  if (snap.exists()) {
-    console.log("[Chat] User profile loaded from Firestore:", snap.data());
-    return snap.data();
-  }
-
-  console.log("[Chat] Creating user profile from Auth object:", user.uid);
-
-  const profile = {
-    uid: user.uid,
-    name: user.displayName || user.email || "Orbi User",
-    email: user.email || "",
-    nameLower: (user.displayName || user.email || "Orbi User").toLowerCase(),
-    emailLower: (user.email || "").toLowerCase(),
-    photoURL: user.photoURL || "",
-    bio: "",
-    status: "offline",
-    lastSeen: serverTimestamp(),
-    createdAt: serverTimestamp()
-  };
-
-  console.log("[Chat] Saving profile to Firestore:", profile);
-
   try {
-    await setDoc(doc(db, "users", user.uid), profile, { merge: true });
-    console.log("[Chat] Profile saved successfully");
-  } catch (error) {
-    console.error("[Chat] Failed to save profile:", error);
-    throw error;
-  }
+    if (!user?.uid) {
+      throw new Error("Missing authenticated user.");
+    }
 
-  return profile;
+    console.log("Loading profile...");
+    const userRef = doc(db, "users", user.uid);
+    const snap = await getDoc(userRef);
+    const fallbackName = user.displayName || user.email || "Orbi User";
+    const existing = snap.exists() ? snap.data() : {};
+    const normalizedProfile = {
+      uid: user.uid,
+      name: existing.name || fallbackName,
+      email: existing.email || user.email || "",
+      avatar: existing.avatar || existing.photoURL || user.photoURL || "",
+      photoURL: existing.photoURL || existing.avatar || user.photoURL || "",
+      status: existing.status || "offline",
+      lastSeen: existing.lastSeen || serverTimestamp(),
+      nameLower: (existing.name || fallbackName).toLowerCase(),
+      emailLower: (existing.email || user.email || "").toLowerCase(),
+      bio: existing.bio || "",
+      createdAt: existing.createdAt || serverTimestamp()
+    };
+
+    await setDoc(userRef, normalizedProfile, { merge: true });
+    console.log("PROFILE LOADED:", normalizedProfile);
+    return normalizedProfile;
+  } catch (err) {
+    console.error("PROFILE ERROR:", err);
+    throw err;
+  }
 };
 
 const participantPayload = (profile, userFallback = {}) => ({
@@ -897,8 +1000,9 @@ const renderEmpty = (target, title, detail) => {
 };
 
 // Render the list of contacts in the sidebar.
-// Contacts are loaded from the privacy-first contacts collection.
+// Contacts are loaded from the users collection after auth is ready.
 const renderContacts = () => {
+  if (!els.contactList || !state.currentUser) return;
   const search = els.userSearch?.value.trim().toLowerCase() || "";
   const contacts = state.contacts
     .filter((contact) => contact.uid !== state.currentUser?.uid)
@@ -933,6 +1037,7 @@ const renderContacts = () => {
 
 // Render the conversation list with unread counts and last message previews.
 const renderConversations = () => {
+  if (!els.conversationList || !state.currentUser) return;
   const chats = [...state.chats.values()]
     .filter((chat) => peerFromChat(chat))
     .sort((a, b) => toMillis(b.updatedAt || b.lastMessageAt) - toMillis(a.updatedAt || a.lastMessageAt));
@@ -965,6 +1070,7 @@ const renderConversations = () => {
 
 
 const setChatHeader = (peer) => {
+  if (!els.chatTitle || !els.chatSubtitle || !els.chatAvatar || !els.messageInput || !els.sendButton) return;
   if (!peer) {
     els.chatTitle.textContent = "Select a conversation";
     els.chatSubtitle.textContent = "Search users or open a recent chat";
@@ -1032,7 +1138,8 @@ const sendImageMessage = async (imageUrl) => {
     senderId: state.currentUser.uid,
     createdAt: serverTimestamp(),
     deliveredTo: [state.currentUser.uid],
-    readBy: [state.currentUser.uid]
+    readBy: [state.currentUser.uid],
+    reactions: {}
   });
 
   await updateDoc(doc(db, "chats", state.activeChatId), {
@@ -1053,7 +1160,8 @@ const sendAudioMessage = async (audioUrl, duration) => {
     senderId: state.currentUser.uid,
     createdAt: serverTimestamp(),
     deliveredTo: [state.currentUser.uid],
-    readBy: [state.currentUser.uid]
+    readBy: [state.currentUser.uid],
+    reactions: {}
   });
 
   await updateDoc(doc(db, "chats", state.activeChatId), {
@@ -1252,6 +1360,12 @@ function getTicks(msg, otherUid) {
 }
 
 const renderMessages = (messages) => {
+  if (!els.chatStream || !state.currentUser) return;
+  state.messages.clear();
+  messages.forEach((message) => {
+    if (message.id) state.messages.set(message.id, message);
+  });
+
   if (!messages.length) {
     els.chatStream.innerHTML = `
       <div class="chat-empty">
@@ -1291,47 +1405,34 @@ const renderMessages = (messages) => {
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>${renderReactions(message)}`;
+        </div>`;
     } else if (message.type === "audio") {
       content = `${renderReply(message, messagesMap)}<audio controls src="${escapeHTML(message.audioUrl)}"></audio>
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>${renderReactions(message)}`;
+        </div>`;
     } else {
       content = `${renderReply(message, messagesMap)}<span class="text">${escapeHTML(message.text)}</span>
         <div class="meta">
           <span class="time">${formatTime(message.createdAt)}</span>
           ${isMe ? `<span class="${ticksClass}">${tickStatus}</span>` : ""}
-        </div>${renderReactions(message)}`;
+        </div>`;
     }
 
     return `
-      <div class="message ${isMe ? "sent" : "received"}">
-        <div class="bubble">
-          ${content}
+      <div class="message ${isMe ? "sent" : "received"}" data-message-id="${escapeHTML(message.id)}">
+        <div class="message-stack">
+          <div class="bubble">
+            ${content}
+          </div>
           ${renderReactions(message)}
+          ${createReactionPicker(message)}
         </div>
-        ${createReactionBar(message.id)}
       </div>
     `;
   }).join("");
   els.chatStream.scrollTop = els.chatStream.scrollHeight;
-
-  els.chatStream.querySelectorAll(".message").forEach((messageEl) => {
-    let timer;
-    messageEl.addEventListener("touchstart", () => {
-      timer = window.setTimeout(() => {
-        messageEl.classList.add("show-reactions");
-      }, 300);
-    });
-    messageEl.addEventListener("touchend", () => clearTimeout(timer));
-    messageEl.addEventListener("touchmove", () => clearTimeout(timer));
-    messageEl.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      messageEl.classList.toggle("show-reactions");
-    });
-  });
 
   // Smart replies for last received message
   const lastReceived = [...messages].reverse().find(m => m.senderId !== state.currentUser.uid);
@@ -1349,24 +1450,32 @@ const renderMessages = (messages) => {
 
 const markChatRead = async (chatId) => {
   if (!chatId || !state.currentUser) return;
-  await updateDoc(doc(db, "chats", chatId), new FieldPath("unreadCounts", state.currentUser.uid), 0);
+  await updateDoc(doc(db, "chats", chatId), {
+    [`unreadCounts.${state.currentUser.uid}`]: 0
+  });
 };
 
 const listenMessages = (chatId) => {
-  if (state.unsubMessages) state.unsubMessages();
+  if (!chatId || !state.currentUser) return;
+  unsubscribe("unsubMessages");
   const messagesRef = collection(db, "chats", chatId, "messages");
   const messagesQuery = query(messagesRef, orderBy("createdAt", "asc"));
 
+  console.log("Loading messages...");
   state.unsubMessages = onSnapshot(messagesQuery, async (snapshot) => {
     const rawMessages = snapshot.docs
       .map((messageDoc) => ({ id: messageDoc.id, ...messageDoc.data() }))
       .sort((a, b) => toMillis(a.createdAt) - toMillis(b.createdAt));
     const messages = await decryptMessages(chatId, rawMessages);
+    if (chatId !== state.activeChatId) return;
     renderMessages(messages);
+    console.log("Messages loaded");
+    console.log("Reactions updated");
     await markChatRead(chatId);
     await markMessagesDelivered(messages);
     await markMessagesRead(messages);
   }, (error) => {
+    console.error("CHAT ERROR:", error);
     showMessage(`Could not load messages: ${error.message}`, "error");
   });
 };
@@ -1392,6 +1501,7 @@ const ensureChat = async (peer) => {
       [peer.uid]: peerParticipant
     },
     unreadCounts,
+    theme: normalizeTheme(existingData.theme),
     createdAt: existingData.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
@@ -1416,6 +1526,8 @@ const openConversation = async (peer, chatId = "") => {
   hideMessage();
   state.activePeer = peer;
   state.activeChatId = chatId || await ensureChat(peer);
+  state.messages.clear();
+  applyTheme(state.chats.get(state.activeChatId)?.theme || DEFAULT_CHAT_THEME);
   setChatHeader(peer);
   renderConversations();
   listenMessages(state.activeChatId);
@@ -1459,6 +1571,7 @@ const sendMessage = async (event) => {
       createdAt: serverTimestamp(),
       deliveredTo: [state.currentUser.uid],
       readBy: [state.currentUser.uid],
+      reactions: {},
       replyTo: replyingTo?.id || null
     });
 
@@ -1471,7 +1584,9 @@ const sendMessage = async (event) => {
       lastMessageSenderId: state.currentUser.uid,
       updatedAt: serverTimestamp()
     });
-    await updateDoc(chatRef, new FieldPath("unreadCounts", state.activePeer.uid), increment(1));
+    await updateDoc(chatRef, {
+      [`unreadCounts.${state.activePeer.uid}`]: increment(1)
+    });
 
     els.messageInput.value = "";
     replyingTo = null;
@@ -1485,42 +1600,112 @@ const sendMessage = async (event) => {
 };
 
 // 🔥 REACTIONS SYSTEM
-const reactions = ["👍","❤️","😂","😮","😢","🔥"];
+const reactions = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
-function createReactionBar(messageId) {
+const userReactedWith = (message, emoji) => {
+  const users = message?.reactions?.[emoji];
+  return Array.isArray(users) && users.includes(state.currentUser?.uid);
+};
+
+const orderedReactionEntries = (message) => {
+  const reactionMap = message?.reactions || {};
+  const known = reactions
+    .filter((emoji) => Array.isArray(reactionMap[emoji]) && reactionMap[emoji].length > 0)
+    .map((emoji) => [emoji, reactionMap[emoji]]);
+  const extras = Object.entries(reactionMap)
+    .filter(([emoji, users]) => !reactions.includes(emoji) && Array.isArray(users) && users.length > 0);
+  return [...known, ...extras];
+};
+
+function createReactionPicker(message) {
+  if (!message?.id) return "";
   return `
-    <div class="reaction-strip">
-      ${reactions.map((emoji) => `
-        <div class="reaction-btn" onclick="addReaction('${state.activeChatId}', '${messageId}', '${emoji}')">${emoji}</div>
-      `).join("")}
+    <div class="reaction-picker" role="group" aria-label="React to message">
+      ${reactions.map((emoji) => {
+        const isActive = userReactedWith(message, emoji);
+        const active = isActive ? " active" : "";
+        return `
+          <button
+            type="button"
+            class="reaction-btn${active}"
+            data-message-id="${escapeHTML(message.id)}"
+            data-reaction-emoji="${escapeHTML(emoji)}"
+            aria-label="React with ${escapeHTML(emoji)}"
+            aria-pressed="${isActive ? "true" : "false"}"
+          >${escapeHTML(emoji)}</button>
+        `;
+      }).join("")}
     </div>
   `;
 }
 
-async function addReaction(chatId, messageId, emoji) {
-  const msgRef = doc(db, "chats", chatId, "messages", messageId);
-  const uid = auth.currentUser?.uid || window.currentUser?.uid;
-  if (!uid) return;
+async function toggleReaction(messageId, emoji) {
+  console.log("Reaction clicked:", emoji);
+  console.log("Message ID:", messageId);
 
-  await updateDoc(msgRef, {
-    [`reactions.${emoji}`]: arrayUnion(uid)
-  });
+  if (!state.currentUser || !state.activeChatId || !messageId || !reactions.includes(emoji)) return;
+
+  const pendingKey = `${state.activeChatId}:${messageId}`;
+  if (state.reactionPending.has(pendingKey)) return;
+
+  state.reactionPending.add(pendingKey);
+  try {
+    const message = state.messages.get(messageId);
+    const alreadyReacted = userReactedWith(message, emoji);
+    const msgRef = doc(db, "chats", state.activeChatId, "messages", messageId);
+    const updates = {};
+
+    if (alreadyReacted) {
+      updates[`reactions.${emoji}`] = arrayRemove(state.currentUser.uid);
+    } else {
+      reactions.forEach((reactionEmoji) => {
+        if (reactionEmoji !== emoji) {
+          updates[`reactions.${reactionEmoji}`] = arrayRemove(state.currentUser.uid);
+        }
+      });
+      updates[`reactions.${emoji}`] = arrayUnion(state.currentUser.uid);
+    }
+
+    await updateDoc(msgRef, updates);
+    console.log("Reaction updated");
+    console.log("Reactions updated");
+  } catch (err) {
+    console.error("Reaction error:", err);
+  } finally {
+    state.reactionPending.delete(pendingKey);
+  }
 }
 
-function renderReactions(msg) {
-  const row = document.createElement("div");
-  row.className = "reaction-row";
+function renderReactions(message) {
+  const entries = orderedReactionEntries(message);
+  if (!entries.length) return "";
 
-  if (!msg.reactions) return row.outerHTML;
-
-  Object.entries(msg.reactions).forEach(([emoji, users]) => {
-    const count = Array.isArray(users) ? users.length : 0;
-    if (count === 0) return;
-    row.innerHTML += `<div class="reaction-badge">${emoji} ${count}</div>`;
-  });
-
-  return row.outerHTML;
+  return `
+    <div class="reaction-row" aria-label="Message reactions">
+      ${entries.map(([emoji, users]) => {
+        const isActive = users.includes(state.currentUser?.uid);
+        const active = isActive ? " reacted" : "";
+        return `<button type="button" class="reaction-badge${active}" data-message-id="${escapeHTML(message.id)}" data-reaction-emoji="${escapeHTML(emoji)}" aria-label="${users.length} ${escapeHTML(emoji)} reaction${users.length === 1 ? "" : "s"}" aria-pressed="${isActive ? "true" : "false"}">${escapeHTML(emoji)} <span>${users.length}</span></button>`;
+      }).join("")}
+    </div>
+  `;
 }
+
+const clearReactionPressTimer = () => {
+  if (state.reactionPressTimer) {
+    clearTimeout(state.reactionPressTimer);
+    state.reactionPressTimer = null;
+  }
+  state.reactionTouchTarget = null;
+};
+
+const closeReactionPickers = (exceptMessage = null) => {
+  els.chatStream?.querySelectorAll(".message.show-reactions").forEach((messageEl) => {
+    if (messageEl !== exceptMessage) {
+      messageEl.classList.remove("show-reactions");
+    }
+  });
+};
 
 // 🧠 SMART REPLIES
 function getSmartReplies(text) {
@@ -1533,7 +1718,8 @@ function getSmartReplies(text) {
 
 // 🎭 INCOGNITO MODE
 async function toggleIncognito(value) {
-  await updateDoc(doc(db, "users", window.currentUser.uid), {
+  if (!state.currentUser) return;
+  await updateDoc(doc(db, "users", state.currentUser.uid), {
     incognito: value
   });
 }
@@ -1559,12 +1745,18 @@ function sendQuick(text) {
 }
 
 const listenContacts = () => {
-  const contactsRef = collection(db, "contacts", state.currentUser.uid, "list");
-  state.unsubContacts = onSnapshot(contactsRef, (snapshot) => {
-    state.contacts = snapshot.docs.map((contactDoc) => ({
-      uid: contactDoc.id,
-      ...contactDoc.data()
-    }));
+  if (!state.currentUser) return;
+  unsubscribe("unsubContacts");
+  console.log("Loading contacts...");
+  const usersRef = collection(db, "users");
+  state.unsubContacts = onSnapshot(usersRef, (snapshot) => {
+    console.log("Users found:", snapshot.size);
+    state.contacts = snapshot.docs
+      .map((userDoc) => ({
+        uid: userDoc.id,
+        ...userDoc.data()
+      }))
+      .filter((contact) => contact.uid !== state.currentUser?.uid);
     renderContacts();
     if (state.activePeer) {
       const freshPeer = state.contacts.find((contact) => contact.uid === state.activePeer.uid);
@@ -1574,14 +1766,18 @@ const listenContacts = () => {
       }
     }
   }, (error) => {
+    console.error("CONTACT ERROR:", error);
     renderEmpty(els.contactList, "Contacts unavailable", error.message);
   });
 };
 
 const listenChats = () => {
+  if (!state.currentUser) return;
+  unsubscribe("unsubChats");
   const chatsRef = collection(db, "chats");
   const chatsQuery = query(chatsRef, where("participantIds", "array-contains", state.currentUser.uid));
 
+  console.log("Loading chats...");
   state.unsubChats = onSnapshot(chatsQuery, (snapshot) => {
     state.chats.clear();
     snapshot.docs.forEach((chatDoc) => {
@@ -1591,12 +1787,19 @@ const listenChats = () => {
       });
     });
     renderConversations();
+    if (state.activeChatId) {
+      applyTheme(state.chats.get(state.activeChatId)?.theme || DEFAULT_CHAT_THEME);
+    }
+    console.log("Chats loaded");
   }, (error) => {
+    console.error("CHAT ERROR:", error);
     renderEmpty(els.conversationList, "Conversations unavailable", error.message);
   });
 };
 
 const bindEvents = () => {
+  if (state.eventsBound) return;
+  state.eventsBound = true;
   els.userSearch?.addEventListener("input", renderContacts);
   els.composer?.addEventListener("submit", sendMessage);
   els.messageInput?.addEventListener("input", () => {
@@ -1609,6 +1812,56 @@ const bindEvents = () => {
     if (state.typingTimer) clearTimeout(state.typingTimer);
     state.isTyping = false;
     stopTyping(state.activeChatId).catch(() => {});
+  });
+
+  els.chatStream?.addEventListener("click", async (event) => {
+    const reactionButton = event.target.closest("[data-reaction-emoji][data-message-id]");
+    if (reactionButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      await toggleReaction(reactionButton.dataset.messageId, reactionButton.dataset.reactionEmoji);
+      closeReactionPickers();
+      return;
+    }
+
+    const messageEl = event.target.closest(".message[data-message-id]");
+    if (!messageEl || event.target.closest(".message-image, audio")) return;
+    if (state.reactionPressOpened) {
+      state.reactionPressOpened = false;
+      return;
+    }
+    if (window.matchMedia("(hover: none), (pointer: coarse)").matches) {
+      const isOpen = messageEl.classList.contains("show-reactions");
+      closeReactionPickers(messageEl);
+      messageEl.classList.toggle("show-reactions", !isOpen);
+    }
+  });
+
+  els.chatStream?.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("[data-reaction-emoji][data-message-id]")) return;
+    const messageEl = event.target.closest(".message[data-message-id]");
+    if (!messageEl) return;
+    clearReactionPressTimer();
+    state.reactionTouchTarget = messageEl;
+    state.reactionPressTimer = window.setTimeout(() => {
+      closeReactionPickers(messageEl);
+      messageEl.classList.add("show-reactions");
+      state.reactionPressOpened = true;
+      state.reactionPressTimer = null;
+    }, 320);
+  });
+
+  ["pointerup", "pointercancel", "pointerleave", "pointermove"].forEach((eventName) => {
+    els.chatStream?.addEventListener(eventName, clearReactionPressTimer);
+  });
+
+  els.chatStream?.addEventListener("contextmenu", (event) => {
+    const messageEl = event.target.closest(".message[data-message-id]");
+    if (!messageEl) return;
+    event.preventDefault();
+    const isOpen = messageEl.classList.contains("show-reactions");
+    closeReactionPickers(messageEl);
+    messageEl.classList.toggle("show-reactions", !isOpen);
   });
 
   els.voiceBtn?.addEventListener("mousedown", startRecording);
@@ -1640,6 +1893,25 @@ const bindEvents = () => {
       );
     };
   }
+
+  els.settingsButton?.addEventListener("click", openThemeModal);
+  els.themeModal?.addEventListener("click", async (event) => {
+    if (event.target.matches("[data-theme-close], [data-theme-backdrop]")) {
+      closeThemeModal();
+      return;
+    }
+
+    const option = event.target.closest("[data-theme-option]");
+    if (!option) return;
+    await saveChatTheme(option.dataset.themeOption);
+    closeThemeModal();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.themeModal && !els.themeModal.hidden) {
+      closeThemeModal();
+    }
+  });
 
   if (els.incognitoToggle) {
     els.incognitoToggle.addEventListener("change", (e) => {
@@ -1907,6 +2179,14 @@ const bindEvents = () => {
 // This function loads the current user's profile, starts real-time listeners,
 // and prepares the UI for direct messaging.
 const initChat = async (user) => {
+  if (!user?.uid || !state.currentProfile) {
+    console.error("[Init] Missing user or profile. Chat initialization stopped.");
+    return;
+  }
+  if (state.initializedUid === user.uid) {
+    console.log("[Init] Chat already initialized for user:", user.uid);
+    return;
+  }
   console.log("[Init] Starting chat initialization for user:", user.uid);
   
   if (!isFirebaseConfigured) {
@@ -1915,10 +2195,18 @@ const initChat = async (user) => {
     return;
   }
 
-  state.currentUser = user;
-  state.currentProfile = await profileFromUser(user);
-  console.log("[Init] User profile loaded:", state.currentProfile);
-  
+  resetRealtimeListeners();
+  state.initializedUid = user.uid;
+  state.activeChatId = "";
+  state.activePeer = null;
+  state.contacts = [];
+  state.chats.clear();
+  state.messages.clear();
+  state.reactionPending.clear();
+  clearReactionPressTimer();
+  applyTheme(DEFAULT_CHAT_THEME);
+
+  // Profile already loaded, just update UI
   updateUserProfileUI();
   if (els.incognitoToggle) {
     els.incognitoToggle.checked = state.currentProfile?.incognito || false;
@@ -1958,11 +2246,15 @@ const initChat = async (user) => {
   }
 
   // Listen for foreground messages
-  onMessage(messaging, (payload) => {
-    if (document.hidden) return; // Background messages handled by service worker
-    console.log("[Messaging] Foreground message received");
-    showToast(`${payload.notification.title}: ${payload.notification.body}`, "info");
-  });
+  try {
+    onMessage(messaging, (payload) => {
+      if (document.hidden) return; // Background messages handled by service worker
+      console.log("[Messaging] Foreground message received");
+      showToast(`${payload.notification.title}: ${payload.notification.body}`, "info");
+    });
+  } catch (error) {
+    console.error("[Messaging] Foreground listener failed:", error);
+  }
 
   if (!state.presenceListenersAttached) {
     state.presenceListenersAttached = true;
@@ -1990,13 +2282,7 @@ const initChat = async (user) => {
       }).catch(() => {});
     });
   }
-};
 
-
-document.addEventListener("DOMContentLoaded", () => {
-  if (!els.composer) return;
-  
-  // Debugging: Log all required IDs
   console.log("[Init] Checking required elements:");
   console.log("[Init] chatList:", els.conversationList);
   console.log("[Init] messages:", els.chatStream);
@@ -2023,93 +2309,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   
   bindEvents();
+};
 
-  const chatList = document.getElementById("chatList");
-  const contactList = document.getElementById("contactList");
-  const messagesEl = document.getElementById("messages");
-  const usernameEl = document.getElementById("username");
-  const userEmailEl = document.getElementById("userEmail");
-  console.log(chatList, contactList, messagesEl, usernameEl, userEmailEl);
+onAuthStateChanged(auth, async (user) => {
+  console.log("AUTH USER:", user);
 
-  // ✅ STEP 1: CENTRALIZE AUTH - Load functions
-  const loadUserProfile = async (user) => {
-    try {
-      state.currentProfile = await profileFromUser(user);
-      updateUserProfileUI();
-      if (els.incognitoToggle) {
-        els.incognitoToggle.checked = state.currentProfile?.incognito || false;
-      }
-    } catch (error) {
-      console.error("[Auth] Failed to load user profile:", error);
-    }
-  };
+  if (!user) {
+    resetRealtimeListeners();
+    state.currentUser = null;
+    state.currentProfile = null;
+    state.initializedUid = "";
+    window.currentUser = null;
+    applyTheme(DEFAULT_CHAT_THEME);
+    window.location.href = "login.html";
+    return;
+  }
 
-  const loadChats = async (uid) => {
-    try {
-      const q = query(collection(db, "chats"), where("participantIds", "array-contains", uid));
-      state.unsubChats = onSnapshot(q, (snapshot) => {
-        state.chats.clear();
-        snapshot.forEach((doc) => {
-          state.chats.set(doc.id, { id: doc.id, ...doc.data() });
-        });
-        renderConversations();
-      });
-    } catch (error) {
-      console.error("[Chat] Failed to load chats:", error);
-    }
-  };
-
-  const loadContacts = async (uid) => {
-    try {
-      const q = query(collection(db, "users"), where("uid", "!=", uid));
-      state.unsubContacts = onSnapshot(q, (snapshot) => {
-        state.contacts = [];
-        snapshot.forEach((doc) => {
-          state.contacts.push({ id: doc.id, ...doc.data() });
-        });
-        renderContacts();
-      });
-    } catch (error) {
-      console.error("[Contacts] Failed to load contacts:", error);
-    }
-  };
-
-  const setupPresence = async (uid) => {
-    try {
-      const userStatusRef = doc(db, "status", uid);
-      await setDoc(userStatusRef, {
-        online: true,
-        lastSeen: serverTimestamp(),
-      }, { merge: true });
-
-      // Set offline on unload
-      window.addEventListener("beforeunload", async () => {
-        await setDoc(userStatusRef, {
-          online: false,
-          lastSeen: serverTimestamp(),
-        }, { merge: true });
-      });
-    } catch (error) {
-      console.error("[Presence] Failed to setup presence:", error);
-    }
-  };
-
-  onAuthStateChanged(auth, async (user) => {
-    if (!user) {
-      window.location.href = "login.html";
-      return;
-    }
-
-    console.log("✅ User loaded:", user.uid);
-
-    // ✅ ALWAYS use this user
+  try {
     window.currentUser = user;
     state.currentUser = user;
-
-    // Load everything AFTER auth
-    await loadUserProfile(user);
-    await loadChats(user.uid);
-    await loadContacts(user.uid);
-    await setupPresence(user.uid);
-  });
+    state.currentProfile = await profileFromUser(user);
+    await initChat(user);
+  } catch (err) {
+    console.error("PROFILE ERROR:", err);
+    renderEmpty(els.contactList, "Profile unavailable", "Refresh the page or check Firestore permissions.");
+    renderEmpty(els.conversationList, "Chats unavailable", "Chat data will load after your profile is available.");
+  }
 });

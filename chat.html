@@ -119,7 +119,7 @@
 
             <div class="header-actions">
               <button class="icon-btn" id="themeToggle">🌙</button>
-              <button class="icon-btn" id="settingsBtn">⚙️</button>
+              <button class="icon-btn" id="settingsBtn" type="button" aria-label="Chat theme" title="Chat theme">⚙️</button>
               <button class="icon-btn logout-btn" id="logoutBtn">Logout</button>
             </div>
           </header>
@@ -226,10 +226,68 @@
       </div>
     </div>
 
+    <!-- Chat Theme Picker -->
+    <div class="theme-modal" data-theme-modal hidden>
+      <div class="theme-backdrop" data-theme-backdrop data-theme-close></div>
+      <div class="theme-panel" role="dialog" aria-modal="true" aria-labelledby="themeTitle">
+        <div class="theme-panel-header">
+          <div>
+            <p class="theme-eyebrow">Conversation</p>
+            <h3 id="themeTitle">Chat Theme</h3>
+          </div>
+          <button class="theme-close" type="button" data-theme-close aria-label="Close theme picker">&times;</button>
+        </div>
+
+        <div class="theme-grid" data-theme-grid>
+          <button class="theme-card theme-card-amoled" type="button" data-theme-option="amoled-black" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">AMOLED Black</span>
+          </button>
+          <button class="theme-card theme-card-cyberpunk" type="button" data-theme-option="cyberpunk" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">Cyberpunk</span>
+          </button>
+          <button class="theme-card theme-card-ios" type="button" data-theme-option="ios-glass" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">iOS Glass</span>
+          </button>
+          <button class="theme-card theme-card-neon" type="button" data-theme-option="neon-blue" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">Neon Blue</span>
+          </button>
+          <button class="theme-card theme-card-sunset" type="button" data-theme-option="sunset-gradient" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">Sunset Gradient</span>
+          </button>
+          <button class="theme-card theme-card-purple" type="button" data-theme-option="midnight-purple" aria-pressed="false">
+            <span class="theme-preview">
+              <span class="theme-preview-bubble sent"></span>
+              <span class="theme-preview-bubble received"></span>
+            </span>
+            <span class="theme-name">Midnight Purple</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div class="toast-container" data-toast-container></div>
 
-    <script type="module" src="./init.js"></script>
     <script type="module" src="assets/js/chat.js"></script>
   </body>
 </html>
